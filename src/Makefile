@@ -15,8 +15,9 @@
 #   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # 
 
-OBJS = main.o render.o config.o
-TARGET=cctvplexer
+OBJS = main.o render.o config.o monitor.o
+INCS = cctvplexer.h render.h monitor.h
+TARGET = cctvplexer cecremote
 
 # Not sure all these defines are needed.
 CFLAGS+=-DSTANDALONE -D__STDC_CONSTANT_MACROS -D__STDC_LIMIT_MACROS
@@ -26,10 +27,13 @@ CFLAGS+=-DOMX -DOMX_SKIP64BIT -ftree-vectorize -pipe -DUSE_EXTERNAL_OMX
 CFLAGS+=-DHAVE_LIBBCM_HOST -DUSE_EXTERNAL_LIBBCM_HOST -DUSE_VCHIQ_ARM
 
 LDFLAGS+= -lconfig
-LDFLAGS+=-L/opt/vc/lib/ -lopenmaxil -lbcm_host 
+LDFLAGS+=-L/opt/vc/lib/ -lopenmaxil -lbcm_host -llirc_client
 INCLUDES+=-I/opt/vc/include/
 
+
 all: $(TARGET)
+
+$(OBJS): $(INCS)
 
 %.o: %.c
 	@rm -f $@ 
@@ -37,6 +41,9 @@ all: $(TARGET)
 
 cctvplexer: $(OBJS)
 	$(CC) -o $@  $(OBJS) $(LDFLAGS)
+
+cecremote: cecremote.o
+	$(CC) -o $@  $< -llirc_client -lcec -ldl
 
 clean:
 	@rm -f $(TARGET) *.o

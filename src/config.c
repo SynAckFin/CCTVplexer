@@ -23,7 +23,7 @@
 
 #define MAX_PATH_SIZE     256
 #define INDEX_NAME  "IndexBLahBlah"
-// If (va) isn't a number use (de). Use (va)/(sc) if sc is number otherwise use (va)
+// If (va) isn't a number use (de) else use (va)/(sc) if sc is number otherwise use (va)
 #define SCALE_OR_VALUE(sc,va,de) ( (va) != (va) ? (de) : (sc) == (sc) ? (va)/(sc) : (va) )
 
 // Default values
@@ -39,14 +39,12 @@ static struct _CameraView DefaultView = {
     .Visible    = 0,            // Invisible
 };
 //
-// Count the children and add a unique
-// incrementing index starting at 0.
-// The count is used to allocate memory and
-// the index for finding the allocated object
-// when it has been referenced in another
-// part of the config.
+// Count the children and add a unique incrementing index starting at 0.
+// The count is used to allocate memory and the index for finding the
+// allocated object when it has been referenced in another part of the
+// config. Returns count
 //
-static int CountAndIndexChildren(config_t *cfg,config_setting_t *setting ) {
+static int CountAndIndexChildren(config_setting_t *setting ) {
     config_setting_t *child;
     config_setting_t *index;
 
@@ -67,8 +65,7 @@ static int CountAndIndexChildren(config_t *cfg,config_setting_t *setting ) {
     }
     return count;
 }
-
-// Get the index number added in CountAndIndexChildren
+// Get the index number of item in setting. Index added in CountAndIndexChildren
 static int GetIndex(config_setting_t *setting,const char *item) {
     config_setting_t *itemcfg;
     int index;
@@ -80,6 +77,47 @@ static int GetIndex(config_setting_t *setting,const char *item) {
     }
     printf("Failed to find index %s in %s.%s\n",INDEX_NAME,config_setting_name(setting),item);
     return -1;
+}
+// Get index of item in path. Index was added in CountAndIndexChildren
+static int GetIndexByPath(config_t *cfg,const char *path,const char *item) {
+    config_setting_t *setting = config_lookup(cfg,path);
+    if(setting == NULL) {
+      printf("Path %s does not exist in config file\n",path);
+      return -1;
+    }
+    return GetIndex(setting,item);
+}
+// Sort function for keymaps
+static int KeyCompare(const void *k1,const void *k2) {
+    return strcmp(((KeyMap) k1)->Key,((KeyMap) k2)->Key);
+}
+// Convert a string into an opcode and arguments
+static int StringToOpcode(config_t *cfg,KeyMap kmap,const char *operation) {
+    // kmap should already be zeroed, but just in case...
+    kmap->OpCode  = Op_None;
+    kmap->OpData1 = 0;
+    kmap->OpData2 = 0;
+    kmap->OpData3 = 0;
+    kmap->OpData4 = 0;
+    // Interpret the string
+    if( strcmp(operation,"ViewNext") == 0 ) {
+      kmap->OpCode = Op_NextView;
+    }
+    else if( strcmp(operation,"ViewPrev") == 0 ) {
+      kmap->OpCode = Op_PrevView;
+    }
+    else if( strncmp(operation,"View.",5) == 0 ) {
+      if( (kmap->OpData1 = GetIndexByPath(cfg,"View",&operation[5])) < 0 ) {
+        printf("Unable to find view: %s\n",&operation[5]);
+        kmap->OpData1 = 0;
+      }
+      else
+        kmap->OpCode = Op_SetView;
+    }
+    else if( strcmp(operation,"Quit") == 0 ) {
+      kmap->OpCode = Op_Quit;
+    }
+    return kmap->OpCode;
 }
 //
 // Builds up a string that references other parts
@@ -135,7 +173,7 @@ static char *StringBuilder(config_t *cfg,const char *string) {
 static int LoadCameras(Plexer plx,config_t *cfg,config_setting_t *cameras) {
     // CAMERAS
     // Count the cameras so space can be allocated
-    plx->CameraCount = CountAndIndexChildren(cfg,cameras);
+    plx->CameraCount = CountAndIndexChildren(cameras);
     // Allocate space for the cameras
     plx->Camera = calloc(plx->CameraCount,sizeof(struct _Camera));
     // Configure them
@@ -182,7 +220,7 @@ static int LoadCameras(Plexer plx,config_t *cfg,config_setting_t *cameras) {
     return 1;
 }
 static int LoadViews(Plexer plx,config_t *cfg,config_setting_t *views,config_setting_t *cset) {
-    plx->ViewCount = CountAndIndexChildren(cfg,views);
+    plx->ViewCount = CountAndIndexChildren(views);
     // Allocate space for the views
     plx->View =  calloc(plx->ViewCount,sizeof(struct _View));
     // Allocate space for each camera view within the views
@@ -257,6 +295,43 @@ static int LoadViews(Plexer plx,config_t *cfg,config_setting_t *views,config_set
     }
     return 1;
 }
+static int LoadKeyMaps(Plexer plx,config_t *cfg,config_setting_t *kmaps) {
+    // Dont need to index but do need the count
+    plx->RemoteControlCount = config_setting_length(kmaps);
+    printf("Found %i remote control configs\n",plx->RemoteControlCount);
+    if(plx->RemoteControlCount == 0)
+      return 1;
+    // Allocate space for the Remote Controls
+    plx->RemoteControl = calloc(plx->RemoteControlCount,sizeof(struct _RemoteControl));
+    // Load each remotes config
+    for(int i=0; i < plx->RemoteControlCount;i++) {
+      RemoteControl rc = &plx->RemoteControl[i];
+      config_setting_t *remote = config_setting_get_elem(kmaps,i);
+      if(remote == NULL) {
+        // NOTE: Could this be dangerous - look into it
+        printf("Failed getting remote config\n");
+        continue;
+      }
+      rc->Name = strdup(config_setting_name(remote));
+      rc->KeyCount = config_setting_length(remote);
+      rc->Key = calloc(rc->KeyCount,sizeof(struct _KeyMap));
+      printf("Remote %s has %i keys\n",rc->Name,rc->KeyCount);
+      // Load each key
+      for(int k = 0; k < rc->KeyCount; k++) {
+        config_setting_t *key = config_setting_get_elem(remote,k);
+        if(key == NULL) {
+          // Could be dangerous
+          printf("Failed to get key\n");
+          continue;
+        }
+        rc->Key[k].Key = strdup(config_setting_name(key));
+        StringToOpcode(cfg,&rc->Key[k],config_setting_get_string(key));
+      }
+      // Sort the keys to make searches quicker
+      qsort(rc->Key,rc->KeyCount,sizeof(struct _KeyMap),KeyCompare);
+    }
+    return 1;
+}
 // Load the config
 Plexer LoadConfig(char *file) {
     config_t cfg;
@@ -285,7 +360,9 @@ Plexer LoadConfig(char *file) {
     // VIEWS
     config_setting_t *views = config_lookup(&cfg,"View");
     LoadViews(plexer,&cfg,views,cams);
-
+    // KEY MAPS
+    config_setting_t *keymaps = config_lookup(&cfg,"KeyMaps");
+    LoadKeyMaps(plexer,&cfg,keymaps);
 //    config_write_file(&cfg, "config.new");
     config_destroy(&cfg);
     return plexer;

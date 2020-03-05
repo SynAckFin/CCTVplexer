@@ -433,14 +433,70 @@ int RenderInitialise() {
     NullSinkPort = GetBasePort(NULL,NullSink);
     return 0;
 }
+void RenderDeInitialise() {
+    if(NullSink) {
+      OMX_SendCommand(NullSink,OMX_CommandPortDisable,NullSinkPort,NULL);
+      WARN(NULL,OMX_SendCommand,NullSink,OMX_CommandStateSet, OMX_StateIdle, NULL);
+      WaitForComponentState(NULL,NullSink,OMX_StateIdle,2);
+      WARN(NULL,OMX_SendCommand,NullSink,OMX_CommandStateSet, OMX_StateLoaded, NULL);
+      WaitForComponentState(NULL,NullSink,OMX_StateLoaded,2);
+      OMX_FreeHandle(NullSink);
+      NullSink = NULL;
+    }
+    if(Background) {
+      RenderRelease(Background);
+      Background = NULL;
+    }
+    OMX_Deinit();
+    vc_dispmanx_display_close(Display);
+    bcm_host_deinit();
+    return;
+}
 //
-// Supposed to free everything bu doesn't yet
+// Supposed to free everything
 //
 void RenderRelease(void *handle) {
-    // Much more than this this to do!!!!
-    if(handle) {
-      free(handle);
+    Renderer r = handle;
+    Buffer buff,b;
+    if(r == NULL)
+      return;
+
+    // Disable and flush decoder port
+    if(r->Decode) {
+      OMX_SendCommand(r->Decode,OMX_CommandPortDisable,r->DecodePort+1,NULL);
+      OMX_SendCommand(r->Decode,OMX_CommandFlush,r->DecodePort+1, NULL);
+      OMX_SendCommand(r->Decode,OMX_CommandPortDisable,r->DecodePort,NULL);
     }
+    // Disable render ports
+    if(r->Render) {
+      OMX_SendCommand(r->Render,OMX_CommandPortDisable,r->RenderPort,NULL);
+      OMX_SendCommand(r->Render,OMX_CommandPortDisable,r->RenderPort+1,NULL);
+    }
+    // Free decode buffers
+    if(r->Decode) {
+      for(buff = r->DecodeBuffer; buff;) {
+        b = buff;
+        buff = buff->Next;
+        OMX_FreeBuffer(r->Decode,r->DecodePort,b->Header);
+        free(b);
+      }
+    }
+    // Put into state OMX_StateLoaded and release
+    if(r->Decode) {
+      WARN(r,OMX_SendCommand,r->Decode,OMX_CommandStateSet, OMX_StateIdle, NULL);
+      WaitForComponentState(r,r->Decode,OMX_StateIdle,2);
+      WARN(r,OMX_SendCommand,r->Decode,OMX_CommandStateSet, OMX_StateLoaded, NULL);
+      WaitForComponentState(r,r->Decode,OMX_StateLoaded,2);
+      OMX_FreeHandle(r->Decode);
+    }
+    if(r->Render) {
+      WARN(r,OMX_SendCommand,r->Render,OMX_CommandStateSet, OMX_StateIdle, NULL);
+      WaitForComponentState(r,r->Render,OMX_StateIdle,2);
+      WARN(r,OMX_SendCommand,r->Render,OMX_CommandStateSet, OMX_StateLoaded, NULL);
+      WaitForComponentState(r,r->Render,OMX_StateLoaded,2);
+      OMX_FreeHandle(r->Render);
+    }
+    free(r);
 }
 //
 // Sets up a decoder/renderer for a H264 stream
@@ -605,10 +661,8 @@ void RendererSetVisible(void *handle) {
       return;
     // Disable the port
     WARN(r,OMX_SendCommand,r->Decode,OMX_CommandPortDisable,r->DecodePort+1,NULL);
-//    WARN(r,OMX_SendCommand,r->NullSink,OMX_CommandPortDisable,r->NullPort,NULL);
     // Release the buffers
     WARN(r,OMX_SendCommand,r->Decode,OMX_CommandFlush,r->DecodePort+1, NULL);
-//    WARN(r,OMX_SendCommand,r->NullSink,OMX_CommandFlush,r->NullPort, NULL);
     // Add tunnel
     WARN(r,OMX_SetupTunnel,r->Decode,r->DecodePort+1,r->Render,r->RenderPort);
     WARN(r,OMX_SendCommand,r->Decode,OMX_CommandPortEnable,r->DecodePort+1, NULL);

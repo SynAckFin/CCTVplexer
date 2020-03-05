@@ -18,6 +18,7 @@
 #define _RENDERER_INCLUDED_
 
 int  RenderInitialise(void);
+void RenderDeInitialise(void);
 void *RenderNew(char *);
 void *RenderGetBuffer(void *,int32_t *);
 void *RenderProcessBuffer(void *,void *,int32_t,int32_t);

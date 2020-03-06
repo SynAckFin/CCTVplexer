@@ -142,7 +142,7 @@ static void KeyPress(struct CallbackData *Data,int KeyCode) {
     msec = tv.tv_sec * 1000 + tv.tv_usec/1000;
 
     if( KeyCode == Data->LastKeyPress ) {
-      int tdiff = msec - Data->LastKeyTime;
+      uint64_t tdiff = msec - Data->LastKeyTime;
       if( tdiff < REPEAT_TIME )
         Data->RepeatCount++;
       else

@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <errno.h>
 #include <time.h>
+#include <getopt.h>
+#include <sysexits.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -16,24 +18,33 @@ struct CallbackData {
     int      LastKeyPress;
     uint64_t LastKeyTime;          // In milliseconds
     int      RepeatCount;
+    char     *ReleaseSuffix;
 };
 
 // Maximum time (milliseconds) between key presses to consider it a repeat
 #define REPEAT_TIME   200
-// Release Suffix
-#define RELEASE_SUFFIX  "_EVUP"
 // The above defines should be configurable
-
+static struct option Options[] = {
+  {"osd",         required_argument, 0,  'o' },    // On screen display name
+  {"port",        required_argument, 0,  'p' },    // CEC port to use
+  {"release",     required_argument, 0,  'r' },    // Suffix indicating key release
+  {"loglevel",    required_argument, 0,  'l' },    // loglevel
+  {"cecloglevel", required_argument, 0,  'c' },    // CEC loglevel
+  {0,         0,                 0,  0 }
+};
+//
+static int Stop = 0;
 // Used for CEC message logging
 static char *LogPrefix[] = {"ERROR","WARNING","NOTICE","TRAFFIC","DEBUG"};
 #define MAX_LOG_PREFIX    (sizeof(LogPrefix)/sizeof(char *) - 1)
-static int LogLevel = CEC_LOG_ERROR|CEC_LOG_WARNING;
+static int LogLevel = 0;
 // Needed by libCEC
+static int CECLogLevel = CEC_LOG_ERROR|CEC_LOG_WARNING;
 static libcec_interface_t   CEC_Interface;
 static libcec_configuration CEC_Config;
 static ICECCallbacks        CEC_Callbacks;
 static char                 CEC_Port[50] = { 0 };
-// These are the mappings from the TV remote keys
+// These are the mappings from the TV remote control keys
 static char *KeyMaps[256] = {
     [CEC_USER_CONTROL_CODE_SELECT]                      = "SELECT",
     [CEC_USER_CONTROL_CODE_UP]                          = "UP",
@@ -128,7 +139,7 @@ static char *KeyMaps[256] = {
 // Capture SIGINT for a clean exit
 static void SigHandler(int Signal) {
   printf("signal caught: %d - exiting\n", Signal);
-  exit(0);
+  Stop = 1;
 }
 //
 // KeyPress - Handle a key being pressed - send it to lirc
@@ -171,7 +182,7 @@ static void KeyRelease(struct CallbackData *Data,int KeyCode) {
     Data->RepeatCount = 0;
 
     char *keysym = KeyMaps[KeyCode] ? KeyMaps[KeyCode] : "UNMAPPED";
-    snprintf(keybuf,BUFSIZ,"%s%s",keysym,RELEASE_SUFFIX);
+    snprintf(keybuf,BUFSIZ,"%s%s",keysym,Data->ReleaseSuffix);
     int lircfd = Data->LircdHandle;
     if(lircfd >= 0) {
       if(lirc_simulate(Data->LircdHandle,"CECRemote",keybuf,KeyCode,0)) {
@@ -183,7 +194,7 @@ static void KeyRelease(struct CallbackData *Data,int KeyCode) {
 static void CB_LogMessage(void *Data, const cec_log_message *Message) {
     const char *level=NULL;
 
-    if( (LogLevel & Message->level) == 0 )
+    if( (CECLogLevel & Message->level) == 0 )
       return;
     // The incoming message has a bit field log level
     // and the assumption is that only one bit is set
@@ -325,16 +336,11 @@ static int CB_StateChange(void* lib, const cec_menu_state state) {
 static void CB_SourceActivated(void* lib, const cec_logical_address addr,uint8_t active){
     printf("SOURCE ACTIVATED %i\n",active);
 }
-// Destroy the interface
-static void CEC_Destroy() {
-    printf("CEC CLEAN UP\n");
-    libcecc_destroy(&CEC_Interface);
-}
 //
 // Initialise the CEC Interface
 //   return 0 on success
 //
-int CECinit(struct CallbackData *CBD) {
+int CECinit(struct CallbackData *CBD,char *Name,char *Port) {
     // Initialise config structure
     libcecc_reset_configuration(&CEC_Config);
     // Set up callbacks
@@ -350,7 +356,7 @@ int CECinit(struct CallbackData *CBD) {
     CEC_Config.bActivateSource  = 0;
     CEC_Config.callbackParam    = CBD;
     CEC_Config.callbacks        = &CEC_Callbacks;
-    snprintf(CEC_Config.strDeviceName, sizeof(CEC_Config.strDeviceName), "CCTVTEST");
+    snprintf(CEC_Config.strDeviceName, sizeof(CEC_Config.strDeviceName), Name);
     // Set the device types
     // Set it as multiple devices so that more key presses
     // for the remote get forwarded to us.
@@ -365,6 +371,11 @@ int CECinit(struct CallbackData *CBD) {
     // init video on targets that need this
     CEC_Interface.init_video_standalone(CEC_Interface.connection);
     // Find a port to connect to
+    if(Port) {
+      strncpy(CEC_Port,Port,sizeof(CEC_Port));
+      // make sure it is terminated
+      CEC_Port[sizeof(CEC_Port)-1] = 0;
+    }
     if (CEC_Port[0] == 0) {
       cec_adapter devices[10];
       int8_t numdevices;
@@ -382,20 +393,68 @@ int CECinit(struct CallbackData *CBD) {
         strcpy(CEC_Port,devices[0].comm);
       }
     }
+    printf("Using port %s\n",CEC_Port);
     // Finally, connect to the device
     if (!CEC_Interface.open(CEC_Interface.connection, CEC_Port, 5000)) {
       printf("unable to open the device on port %s\n", CEC_Port);
       libcecc_destroy(&CEC_Interface);
       return -1;
     }
-    atexit(CEC_Destroy);
     return 0;
 }
-
-int main() {
+static void usage(char *Name) {
+    char *s;
+    // Skip any path in Name
+    if( (s = strrchr(Name,'/')) == NULL)
+      s = Name;
+    else
+      s++;
+    fprintf(stderr,"usage: %s [options]\n",s);
+    fprintf(stderr,"\nOptions:\n");
+    fprintf(stderr," %-30s%s\n","-o, --osd <osdname>","The string to use for the On screen name");
+    fprintf(stderr," %-30s%s\n","-p, --port <port>","The CEC port to connect to");
+    fprintf(stderr," %-30s%s\n","-r, --release <port>","LIRC string to append for button release");
+    fprintf(stderr," %-30s%s\n","-l, --loglevel <port>","Logging level");
+    fprintf(stderr," %-30s%s\n","-c, --cecloglevel <bits>","CEC logging level (bits)");
+    fprintf(stderr," %-32s%s\n","","CEC_LOG_ERROR   0x01");
+    fprintf(stderr," %-32s%s\n","","CEC_LOG_WARNING 0x02");
+    fprintf(stderr," %-32s%s\n","","CEC_LOG_NOTICE  0x04");
+    fprintf(stderr," %-32s%s\n","","CEC_LOG_TRAFFIC 0x08");
+    fprintf(stderr," %-32s%s\n","","CEC_LOG_DEBUG   0x10");
+    fprintf(stderr," %-32s%s\n","","CEC_LOG_ALL     0x1F");
+    exit(EX_USAGE);
+}
+int main(int ac, char *av[]) {
     struct CallbackData cbd;
-    time_t nextlirctry = 0;         // The next time to connect to lirc
+    time_t nextlirctry = 0;               // The next time to connect to lirc
+    // options
+    char *osd  = "CCTVTEST";              // On screen display name
+    char *port = NULL;                    // CEC port
+    char *release = LIRC_RELEASE_SUFFIX;
 
+    int c;
+    int idx = 0;
+    while ( (c = getopt_long_only(ac, av, "",Options,&idx)) >= 0) {
+      switch (c) {
+        case 0:
+          printf("Oops, my mistake; check def for --%s\n",Options[idx].name);
+          break;
+        case 'o': osd = optarg; break;
+        case 'p': port = optarg; break;
+        case 'r': release = optarg; break;
+        case 'l': LogLevel = strtol(optarg,NULL,0); break;
+        case 'c': CECLogLevel = strtol(optarg,NULL,0); break;
+        case '?':
+        default:  usage(av[0]); break;
+      }
+    }
+    if (optind < ac) {
+      fprintf(stderr,"Unexpected arguments: ");
+      while (optind < ac)
+        fprintf(stderr,"%s ", av[optind++]);
+      fprintf(stderr,"\n");
+      usage(av[0]);
+    }
     // No output buffering if it isn't a tty
     if(!isatty(fileno(stdout)))
       setbuf(stdout, NULL);
@@ -407,13 +466,14 @@ int main() {
     // Initialise cbd
     memset(&cbd,0,sizeof(cbd));
     cbd.LircdHandle = -1;
+    cbd.ReleaseSuffix = release;
     // Initialise the CEC
-    if(1 && CECinit(&cbd)) {
-      printf("Failed to initialise CEC\n");
-      return -1;
+    if(CECinit(&cbd,osd,port)) {
+      fprintf(stderr,"Failed to initialise CEC\n");
+      return EX_UNAVAILABLE;
     }
-    // Loop handling lirc, everything else is handled in callbacks
-    while(1) {
+    // Loop handling lirc, everything else is handled in libCEC callbacks
+    while(Stop == 0) {
       time_t now = time(NULL);
       if(cbd.LircdHandle < 0 && nextlirctry <= now) {
         if( (cbd.LircdHandle = lirc_get_local_socket(NULL,0)) < 0) {
@@ -473,5 +533,6 @@ int main() {
         }
       }
     }
-    return 0;
+    libcecc_destroy(&CEC_Interface);
+    return EX_OK;
 }

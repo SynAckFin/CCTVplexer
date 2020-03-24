@@ -19,6 +19,7 @@ struct CallbackData {
     uint64_t LastKeyTime;          // In milliseconds
     int      RepeatCount;
     char     *ReleaseSuffix;
+    char     *RemoteName;
 };
 
 // Maximum time (milliseconds) between key presses to consider it a repeat
@@ -28,6 +29,7 @@ static struct option Options[] = {
   {"osd",         required_argument, 0,  'o' },    // On screen display name
   {"port",        required_argument, 0,  'p' },    // CEC port to use
   {"release",     required_argument, 0,  'r' },    // Suffix indicating key release
+  {"remotename",  required_argument, 0,  'n' },    // Name to use for the remote control
   {"loglevel",    required_argument, 0,  'l' },    // loglevel
   {"cecloglevel", required_argument, 0,  'c' },    // CEC loglevel
   {0,         0,                 0,  0 }
@@ -46,23 +48,23 @@ static ICECCallbacks        CEC_Callbacks;
 static char                 CEC_Port[50] = { 0 };
 // These are the mappings from the TV remote control keys
 static char *KeyMaps[256] = {
-    [CEC_USER_CONTROL_CODE_SELECT]                      = "SELECT",
-    [CEC_USER_CONTROL_CODE_UP]                          = "UP",
-    [CEC_USER_CONTROL_CODE_DOWN]                        = "DOWN",
-    [CEC_USER_CONTROL_CODE_LEFT]                        = "LEFT",
-    [CEC_USER_CONTROL_CODE_RIGHT]                       = "RIGHT",
-    [CEC_USER_CONTROL_CODE_RIGHT_UP]                    = "RIGHT_UP",
-    [CEC_USER_CONTROL_CODE_RIGHT_DOWN]                  = "RIGHT_DOWN",
-    [CEC_USER_CONTROL_CODE_LEFT_UP]                     = "LEFT_UP",
-    [CEC_USER_CONTROL_CODE_LEFT_DOWN]                   = "LEFT_DOWN",
-    [CEC_USER_CONTROL_CODE_ROOT_MENU]                   = "ROOT_MENU",
-    [CEC_USER_CONTROL_CODE_SETUP_MENU]                  = "SETUP_MENU",
-    [CEC_USER_CONTROL_CODE_CONTENTS_MENU]               = "CONTENTS_MENU",
-    [CEC_USER_CONTROL_CODE_FAVORITE_MENU]               = "FAVORITE_MENU",
-    [CEC_USER_CONTROL_CODE_EXIT]                        = "EXIT",
-    [CEC_USER_CONTROL_CODE_TOP_MENU]                    = "TOP_MENU",
-    [CEC_USER_CONTROL_CODE_DVD_MENU]                    = "DVD_MENU",
-    [CEC_USER_CONTROL_CODE_NUMBER_ENTRY_MODE]           = "NUMBER_ENTRY_MODE",
+    [CEC_USER_CONTROL_CODE_SELECT]                      = "KEY_SELECT",
+    [CEC_USER_CONTROL_CODE_UP]                          = "KEY_UP",
+    [CEC_USER_CONTROL_CODE_DOWN]                        = "KEY_DOWN",
+    [CEC_USER_CONTROL_CODE_LEFT]                        = "KEY_LEFT",
+    [CEC_USER_CONTROL_CODE_RIGHT]                       = "KEY_RIGHT",
+    [CEC_USER_CONTROL_CODE_RIGHT_UP]                    = "KEY_RIGHT_UP",
+    [CEC_USER_CONTROL_CODE_RIGHT_DOWN]                  = "KEY_RIGHT_DOWN",
+    [CEC_USER_CONTROL_CODE_LEFT_UP]                     = "KEY_LEFT_UP",
+    [CEC_USER_CONTROL_CODE_LEFT_DOWN]                   = "KEY_LEFT_DOWN",
+    [CEC_USER_CONTROL_CODE_ROOT_MENU]                   = "KEY_ROOT_MENU",
+    [CEC_USER_CONTROL_CODE_SETUP_MENU]                  = "KEY_SETUP_MENU",
+    [CEC_USER_CONTROL_CODE_CONTENTS_MENU]               = "KEY_CONTENTS_MENU",
+    [CEC_USER_CONTROL_CODE_FAVORITE_MENU]               = "KEY_FAVORITE_MENU",
+    [CEC_USER_CONTROL_CODE_EXIT]                        = "KEY_EXIT",
+    [CEC_USER_CONTROL_CODE_TOP_MENU]                    = "KEY_TOP_MENU",
+    [CEC_USER_CONTROL_CODE_DVD_MENU]                    = "KEY_DVD_MENU",
+    [CEC_USER_CONTROL_CODE_NUMBER_ENTRY_MODE]           = "KEY_NUMBER_ENTRY_MODE",
     [CEC_USER_CONTROL_CODE_NUMBER11]                    = "KEY_11",
     [CEC_USER_CONTROL_CODE_NUMBER12]                    = "KEY_12",
     [CEC_USER_CONTROL_CODE_NUMBER0]                     = "KEY_0",
@@ -75,66 +77,66 @@ static char *KeyMaps[256] = {
     [CEC_USER_CONTROL_CODE_NUMBER7]                     = "KEY_7",
     [CEC_USER_CONTROL_CODE_NUMBER8]                     = "KEY_8",
     [CEC_USER_CONTROL_CODE_NUMBER9]                     = "KEY_9",
-    [CEC_USER_CONTROL_CODE_DOT]                         = "DOT",
-    [CEC_USER_CONTROL_CODE_ENTER]                       = "ENTER",
-    [CEC_USER_CONTROL_CODE_CLEAR]                       = "CLEAR",
-    [CEC_USER_CONTROL_CODE_NEXT_FAVORITE]               = "NEXT_FAVORITE",
-    [CEC_USER_CONTROL_CODE_CHANNEL_UP]                  = "CHANNEL_UP",
-    [CEC_USER_CONTROL_CODE_CHANNEL_DOWN]                = "CHANNEL_DOWN",
-    [CEC_USER_CONTROL_CODE_PREVIOUS_CHANNEL]            = "PREVIOUS_CHANNEL",
-    [CEC_USER_CONTROL_CODE_SOUND_SELECT]                = "SOUND_SELECT",
-    [CEC_USER_CONTROL_CODE_INPUT_SELECT]                = "INPUT_SELECT",
-    [CEC_USER_CONTROL_CODE_DISPLAY_INFORMATION]         = "DISPLAY_INFORMATION",
-    [CEC_USER_CONTROL_CODE_HELP]                        = "HELP",
-    [CEC_USER_CONTROL_CODE_PAGE_UP]                     = "PAGE_UP",
-    [CEC_USER_CONTROL_CODE_PAGE_DOWN]                   = "PAGE_DOWN",
-    [CEC_USER_CONTROL_CODE_POWER]                       = "POWER",
-    [CEC_USER_CONTROL_CODE_VOLUME_UP]                   = "VOLUME_UP",
-    [CEC_USER_CONTROL_CODE_VOLUME_DOWN]                 = "VOLUME_DOWN",
-    [CEC_USER_CONTROL_CODE_MUTE]                        = "MUTE",
-    [CEC_USER_CONTROL_CODE_PLAY]                        = "PLAY",
-    [CEC_USER_CONTROL_CODE_STOP]                        = "STOP",
-    [CEC_USER_CONTROL_CODE_PAUSE]                       = "PAUSE",
-    [CEC_USER_CONTROL_CODE_RECORD]                      = "RECORD",
-    [CEC_USER_CONTROL_CODE_REWIND]                      = "REWIND",
-    [CEC_USER_CONTROL_CODE_FAST_FORWARD]                = "FAST_FORWARD",
-    [CEC_USER_CONTROL_CODE_EJECT]                       = "EJECT",
-    [CEC_USER_CONTROL_CODE_FORWARD]                     = "FORWARD",
-    [CEC_USER_CONTROL_CODE_BACKWARD]                    = "BACKWARD",
-    [CEC_USER_CONTROL_CODE_STOP_RECORD]                 = "STOP_RECORD",
-    [CEC_USER_CONTROL_CODE_PAUSE_RECORD]                = "PAUSE_RECORD",
-    [CEC_USER_CONTROL_CODE_ANGLE]                       = "ANGLE",
-    [CEC_USER_CONTROL_CODE_SUB_PICTURE]                 = "SUB_PICTURE",
-    [CEC_USER_CONTROL_CODE_VIDEO_ON_DEMAND]             = "VIDEO_ON_DEMAND",
-    [CEC_USER_CONTROL_CODE_ELECTRONIC_PROGRAM_GUIDE]    = "EEPG",
-    [CEC_USER_CONTROL_CODE_TIMER_PROGRAMMING]           = "TIMER_PROGRAMMING",
-    [CEC_USER_CONTROL_CODE_INITIAL_CONFIGURATION]       = "INITIAL_CONFIGURATION",
-    [CEC_USER_CONTROL_CODE_SELECT_BROADCAST_TYPE]       = "SELECT_BROADCAST_TYPE",
-    [CEC_USER_CONTROL_CODE_SELECT_SOUND_PRESENTATION]   = "SELECT_SOUND_PRESENTATION",
-    [CEC_USER_CONTROL_CODE_PLAY_FUNCTION]               = "PLAY_FUNCTION",
-    [CEC_USER_CONTROL_CODE_PAUSE_PLAY_FUNCTION]         = "PAUSE_PLAY_FUNCTION",
-    [CEC_USER_CONTROL_CODE_RECORD_FUNCTION]             = "RECORD_FUNCTION",
-    [CEC_USER_CONTROL_CODE_PAUSE_RECORD_FUNCTION]       = "PAUSE_RECORD_FUNCTION",
-    [CEC_USER_CONTROL_CODE_STOP_FUNCTION]               = "STOP_FUNCTION",
-    [CEC_USER_CONTROL_CODE_MUTE_FUNCTION]               = "MUTE_FUNCTION",
-    [CEC_USER_CONTROL_CODE_RESTORE_VOLUME_FUNCTION]     = "RESTORE_VOLUME_FUNCTION",
-    [CEC_USER_CONTROL_CODE_TUNE_FUNCTION]               = "TUNE_FUNCTION",
-    [CEC_USER_CONTROL_CODE_SELECT_MEDIA_FUNCTION]       = "SELECT_MEDIA_FUNCTION",
-    [CEC_USER_CONTROL_CODE_SELECT_AV_INPUT_FUNCTION]    = "SELECT_AV_INPUT_FUNCTION",
-    [CEC_USER_CONTROL_CODE_SELECT_AUDIO_INPUT_FUNCTION] = "SELECT_AUDIO_INPUT_FUNCTION",
-    [CEC_USER_CONTROL_CODE_POWER_TOGGLE_FUNCTION]       = "POWER_TOGGLE_FUNCTION",
-    [CEC_USER_CONTROL_CODE_POWER_OFF_FUNCTION]          = "POWER_OFF_FUNCTION",
-    [CEC_USER_CONTROL_CODE_POWER_ON_FUNCTION]           = "POWER_ON_FUNCTION",
-    [CEC_USER_CONTROL_CODE_F1_BLUE]                     = "F1_BLUE",
-    [CEC_USER_CONTROL_CODE_F2_RED]                      = "F2_RED",
-    [CEC_USER_CONTROL_CODE_F3_GREEN]                    = "F3_GREEN",
-    [CEC_USER_CONTROL_CODE_F4_YELLOW]                   = "F4_YELLOW",
-    [CEC_USER_CONTROL_CODE_F5]                          = "F5",
-    [CEC_USER_CONTROL_CODE_DATA]                        = "DATA",
-    [CEC_USER_CONTROL_CODE_AN_RETURN]                   = "AN_RETURN",
-    [CEC_USER_CONTROL_CODE_AN_CHANNELS_LIST]            = "AN_CHANNELS_LIST",
-    [CEC_USER_CONTROL_CODE_MAX]                         = "MAX",
-    [CEC_USER_CONTROL_CODE_UNKNOWN]                     = "UNKNOWN"
+    [CEC_USER_CONTROL_CODE_DOT]                         = "KEY_DOT",
+    [CEC_USER_CONTROL_CODE_ENTER]                       = "KEY_ENTER",
+    [CEC_USER_CONTROL_CODE_CLEAR]                       = "KEY_CLEAR",
+    [CEC_USER_CONTROL_CODE_NEXT_FAVORITE]               = "KEY_NEXT_FAVORITE",
+    [CEC_USER_CONTROL_CODE_CHANNEL_UP]                  = "KEY_CHANNEL_UP",
+    [CEC_USER_CONTROL_CODE_CHANNEL_DOWN]                = "KEY_CHANNEL_DOWN",
+    [CEC_USER_CONTROL_CODE_PREVIOUS_CHANNEL]            = "KEY_PREVIOUS_CHANNEL",
+    [CEC_USER_CONTROL_CODE_SOUND_SELECT]                = "KEY_SOUND_SELECT",
+    [CEC_USER_CONTROL_CODE_INPUT_SELECT]                = "KEY_INPUT_SELECT",
+    [CEC_USER_CONTROL_CODE_DISPLAY_INFORMATION]         = "KEY_DISPLAY_INFORMATION",
+    [CEC_USER_CONTROL_CODE_HELP]                        = "KEY_HELP",
+    [CEC_USER_CONTROL_CODE_PAGE_UP]                     = "KEY_PAGE_UP",
+    [CEC_USER_CONTROL_CODE_PAGE_DOWN]                   = "KEY_PAGE_DOWN",
+    [CEC_USER_CONTROL_CODE_POWER]                       = "KEY_POWER",
+    [CEC_USER_CONTROL_CODE_VOLUME_UP]                   = "KEY_VOLUME_UP",
+    [CEC_USER_CONTROL_CODE_VOLUME_DOWN]                 = "KEY_VOLUME_DOWN",
+    [CEC_USER_CONTROL_CODE_MUTE]                        = "KEY_MUTE",
+    [CEC_USER_CONTROL_CODE_PLAY]                        = "KEY_PLAY",
+    [CEC_USER_CONTROL_CODE_STOP]                        = "KEY_STOP",
+    [CEC_USER_CONTROL_CODE_PAUSE]                       = "KEY_PAUSE",
+    [CEC_USER_CONTROL_CODE_RECORD]                      = "KEY_RECORD",
+    [CEC_USER_CONTROL_CODE_REWIND]                      = "KEY_REWIND",
+    [CEC_USER_CONTROL_CODE_FAST_FORWARD]                = "KEY_FAST_FORWARD",
+    [CEC_USER_CONTROL_CODE_EJECT]                       = "KEY_EJECT",
+    [CEC_USER_CONTROL_CODE_FORWARD]                     = "KEY_FORWARD",
+    [CEC_USER_CONTROL_CODE_BACKWARD]                    = "KEY_BACKWARD",
+    [CEC_USER_CONTROL_CODE_STOP_RECORD]                 = "KEY_STOP_RECORD",
+    [CEC_USER_CONTROL_CODE_PAUSE_RECORD]                = "KEY_PAUSE_RECORD",
+    [CEC_USER_CONTROL_CODE_ANGLE]                       = "KEY_ANGLE",
+    [CEC_USER_CONTROL_CODE_SUB_PICTURE]                 = "KEY_SUB_PICTURE",
+    [CEC_USER_CONTROL_CODE_VIDEO_ON_DEMAND]             = "KEY_VIDEO_ON_DEMAND",
+    [CEC_USER_CONTROL_CODE_ELECTRONIC_PROGRAM_GUIDE]    = "KEY_EEPG",
+    [CEC_USER_CONTROL_CODE_TIMER_PROGRAMMING]           = "KEY_TIMER_PROGRAMMING",
+    [CEC_USER_CONTROL_CODE_INITIAL_CONFIGURATION]       = "KEY_INITIAL_CONFIGURATION",
+    [CEC_USER_CONTROL_CODE_SELECT_BROADCAST_TYPE]       = "KEY_SELECT_BROADCAST_TYPE",
+    [CEC_USER_CONTROL_CODE_SELECT_SOUND_PRESENTATION]   = "KEY_SELECT_SOUND_PRESENTATION",
+    [CEC_USER_CONTROL_CODE_PLAY_FUNCTION]               = "KEY_PLAY_FUNCTION",
+    [CEC_USER_CONTROL_CODE_PAUSE_PLAY_FUNCTION]         = "KEY_PAUSE_PLAY_FUNCTION",
+    [CEC_USER_CONTROL_CODE_RECORD_FUNCTION]             = "KEY_RECORD_FUNCTION",
+    [CEC_USER_CONTROL_CODE_PAUSE_RECORD_FUNCTION]       = "KEY_PAUSE_RECORD_FUNCTION",
+    [CEC_USER_CONTROL_CODE_STOP_FUNCTION]               = "KEY_STOP_FUNCTION",
+    [CEC_USER_CONTROL_CODE_MUTE_FUNCTION]               = "KEY_MUTE_FUNCTION",
+    [CEC_USER_CONTROL_CODE_RESTORE_VOLUME_FUNCTION]     = "KEY_RESTORE_VOLUME_FUNCTION",
+    [CEC_USER_CONTROL_CODE_TUNE_FUNCTION]               = "KEY_TUNE_FUNCTION",
+    [CEC_USER_CONTROL_CODE_SELECT_MEDIA_FUNCTION]       = "KEY_SELECT_MEDIA_FUNCTION",
+    [CEC_USER_CONTROL_CODE_SELECT_AV_INPUT_FUNCTION]    = "KEY_SELECT_AV_INPUT_FUNCTION",
+    [CEC_USER_CONTROL_CODE_SELECT_AUDIO_INPUT_FUNCTION] = "KEY_SELECT_AUDIO_INPUT_FUNCTION",
+    [CEC_USER_CONTROL_CODE_POWER_TOGGLE_FUNCTION]       = "KEY_POWER_TOGGLE_FUNCTION",
+    [CEC_USER_CONTROL_CODE_POWER_OFF_FUNCTION]          = "KEY_POWER_OFF_FUNCTION",
+    [CEC_USER_CONTROL_CODE_POWER_ON_FUNCTION]           = "KEY_POWER_ON_FUNCTION",
+    [CEC_USER_CONTROL_CODE_F1_BLUE]                     = "KEY_F1_BLUE",
+    [CEC_USER_CONTROL_CODE_F2_RED]                      = "KEY_F2_RED",
+    [CEC_USER_CONTROL_CODE_F3_GREEN]                    = "KEY_F3_GREEN",
+    [CEC_USER_CONTROL_CODE_F4_YELLOW]                   = "KEY_F4_YELLOW",
+    [CEC_USER_CONTROL_CODE_F5]                          = "KEY_F5",
+    [CEC_USER_CONTROL_CODE_DATA]                        = "KEY_DATA",
+    [CEC_USER_CONTROL_CODE_AN_RETURN]                   = "KEY_AN_RETURN",
+    [CEC_USER_CONTROL_CODE_AN_CHANNELS_LIST]            = "KEY_AN_CHANNELS_LIST",
+    [CEC_USER_CONTROL_CODE_MAX]                         = "KEY_MAX",
+    [CEC_USER_CONTROL_CODE_UNKNOWN]                     = "KEY_UNKNOWN"
 };
 // Capture SIGINT for a clean exit
 static void SigHandler(int Signal) {
@@ -168,7 +170,7 @@ static void KeyPress(struct CallbackData *Data,int KeyCode) {
     char *keysym = KeyMaps[KeyCode] ? KeyMaps[KeyCode] : "UNMAPPED";
     int lircfd = Data->LircdHandle;
     if(lircfd >= 0) {
-      if(lirc_simulate(Data->LircdHandle,"CECRemote",keysym,KeyCode,Data->RepeatCount)) {
+      if(lirc_simulate(Data->LircdHandle,Data->RemoteName,keysym,KeyCode,Data->RepeatCount)) {
         printf("Fail\n");
       }
     }
@@ -185,7 +187,7 @@ static void KeyRelease(struct CallbackData *Data,int KeyCode) {
     snprintf(keybuf,BUFSIZ,"%s%s",keysym,Data->ReleaseSuffix);
     int lircfd = Data->LircdHandle;
     if(lircfd >= 0) {
-      if(lirc_simulate(Data->LircdHandle,"CECRemote",keybuf,KeyCode,0)) {
+      if(lirc_simulate(Data->LircdHandle,Data->RemoteName,keybuf,KeyCode,0)) {
         printf("Fail\n");
       }
     }
@@ -413,8 +415,9 @@ static void usage(char *Name) {
     fprintf(stderr,"\nOptions:\n");
     fprintf(stderr," %-30s%s\n","-o, --osd <osdname>","The string to use for the On screen name");
     fprintf(stderr," %-30s%s\n","-p, --port <port>","The CEC port to connect to");
-    fprintf(stderr," %-30s%s\n","-r, --release <port>","LIRC string to append for button release");
-    fprintf(stderr," %-30s%s\n","-l, --loglevel <port>","Logging level");
+    fprintf(stderr," %-30s%s\n","-r, --release <string>","LIRC string to append for button release");
+    fprintf(stderr," %-30s%s\n","-n, --remotename <name>","LIRC name of the remote");
+    fprintf(stderr," %-30s%s\n","-l, --loglevel <level>","Logging level");
     fprintf(stderr," %-30s%s\n","-c, --cecloglevel <bits>","CEC logging level (bits)");
     fprintf(stderr," %-32s%s\n","","CEC_LOG_ERROR   0x01");
     fprintf(stderr," %-32s%s\n","","CEC_LOG_WARNING 0x02");
@@ -431,10 +434,11 @@ int main(int ac, char *av[]) {
     char *osd  = "CCTVTEST";              // On screen display name
     char *port = NULL;                    // CEC port
     char *release = LIRC_RELEASE_SUFFIX;
+    char *rname = "CECRemote";
 
     int c;
     int idx = 0;
-    while ( (c = getopt_long_only(ac, av, "",Options,&idx)) >= 0) {
+    while ( (c = getopt_long(ac, av, "o:p:r:n:l:c:",Options,&idx)) >= 0) {
       switch (c) {
         case 0:
           printf("Oops, my mistake; check def for --%s\n",Options[idx].name);
@@ -442,6 +446,7 @@ int main(int ac, char *av[]) {
         case 'o': osd = optarg; break;
         case 'p': port = optarg; break;
         case 'r': release = optarg; break;
+        case 'n': rname = optarg; break;
         case 'l': LogLevel = strtol(optarg,NULL,0); break;
         case 'c': CECLogLevel = strtol(optarg,NULL,0); break;
         case '?':
@@ -466,6 +471,7 @@ int main(int ac, char *av[]) {
     // Initialise cbd
     memset(&cbd,0,sizeof(cbd));
     cbd.LircdHandle = -1;
+    cbd.RemoteName = rname;
     cbd.ReleaseSuffix = release;
     // Initialise the CEC
     if(CECinit(&cbd,osd,port)) {

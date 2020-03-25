@@ -9,18 +9,48 @@ typedef struct _View          *View;
 typedef struct _Plexer        *Plexer;
 typedef struct _KeyMap        *KeyMap;
 typedef struct _RemoteControl *RemoteControl;
+typedef struct _PTZController *PTZController;
 typedef enum   _OpCode        OpCode;
+typedef enum   _HttpMethod    HttpMethod;
 
 enum _OpCode {
     Op_None = 0,
+    Op_PTZ_None = 0,
+    Op_PTZ_Stop,
+    Op_PTZ_Up,
+    Op_PTZ_UpRight,
+    Op_PTZ_Right,
+    Op_PTZ_DownRight,
+    Op_PTZ_Down,
+    Op_PTZ_DownLeft,
+    Op_PTZ_Left,
+    Op_PTZ_UpLeft,
+    Op_PTZ_ZoomIn,
+    Op_PTZ_ZoomOut,
+    Op_PTZ_FocusNear,
+    Op_PTZ_FocusFar,
+    Op_PTZ_IrisClose,
+    Op_PTZ_IrisOpen,
+    Op_PTZ_GotoPreset,
+    Op_PTZ_SetPreset,
+    Op_PTZ_ClearPreset,
+    Op_PTZ_Max,             // This must be the last PTZ Op
     Op_SetView,
     Op_NextView,
     Op_PrevView,
-    Op_Quit
+    Op_Quit,
+    Op_Max
+};
+enum _HttpMethod {
+    HTTP_GET,
+    HTTP_POST,
+    HTTP_PUT,
+    HTTP_DELETE
 };
 struct _Camera {
     char    *Name;
     int32_t ControlID;
+    PTZController PTZ;
     char    **StreamCommand;
     int     StreamPipe[2];
     void    *RenderHandle;
@@ -37,15 +67,18 @@ struct _CameraView {
 };
 struct _View {
     CameraView View;
+    Camera     Focus;
     int32_t    Background;
 };
 struct _KeyMap {
     char    *Key;
+    int32_t RepeatCount;
     OpCode  OpCode;
     int32_t OpData1;
-    int32_t OpData2;          // Unused
-    int32_t OpData3;          // Unused
-    int32_t OpData4;          // Unused
+    int32_t OpData2;
+    int32_t OpData3;
+    int32_t OpData4;
+    int32_t OpData5;
 };
 struct _RemoteControl {
     char    *Name;
@@ -55,6 +88,7 @@ struct _RemoteControl {
 struct _Plexer {
     int32_t       CameraCount;
     Camera        Camera;
+    Camera        Focus;
     int32_t       ViewCount;
     View          View;
     int32_t       CurrentView;
@@ -62,6 +96,16 @@ struct _Plexer {
     RemoteControl RemoteControl;
     int32_t       Background;
 };
+struct _PTZController {
+    char *Name;
+    struct {
+      char       *URL;
+      HttpMethod  Method;
+      char       *Content;
+      char       *ContentType;
+    } Control[Op_PTZ_Max];
+};
 
 Plexer LoadConfig(char *);
+void MonitorInitialise(void);
 #endif

@@ -26,10 +26,9 @@ CFLAGS+=-D_FILE_OFFSET_BITS=64 -U_FORTIFY_SOURCE -Wall -g -DHAVE_LIBOPENMAX=2
 CFLAGS+=-DOMX -DOMX_SKIP64BIT -ftree-vectorize -pipe -DUSE_EXTERNAL_OMX
 CFLAGS+=-DHAVE_LIBBCM_HOST -DUSE_EXTERNAL_LIBBCM_HOST -DUSE_VCHIQ_ARM
 
-LDFLAGS+= -lconfig
+LDFLAGS+= -lconfig -lcurl
 LDFLAGS+=-L/opt/vc/lib/ -lopenmaxil -lbcm_host -llirc_client
 INCLUDES+=-I/opt/vc/include/
-
 
 all: $(TARGET)
 

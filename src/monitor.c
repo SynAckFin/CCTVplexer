@@ -21,19 +21,29 @@
 #include <time.h>
 #include <assert.h>
 #include <sys/select.h>
+#include <curl/curl.h>
 #include "monitor.h"
 
 #define MAX_MONITORS      64
 #define FLG_USED          0x0001
 
+CURLM *CurlHandle = NULL;
 typedef struct _MonList *MonList;
 struct _MonList {
     struct _MonitorHandle Handle;
     uint32_t Flags;
 };
 struct _MonList Monitor[MAX_MONITORS];
+struct curl_waitfd CurlExtraFD[MAX_MONITORS];
+
 uint32_t  MaxInUse = 0;
 
+void MonitorInitialise() {
+    if(CurlHandle)
+      return;
+    curl_global_init(CURL_GLOBAL_ALL);
+    CurlHandle = curl_multi_init();
+}
 // Add an input source
 MonitorHandle MonitorNew(const char *Name) {
     MonList ml = NULL;
@@ -60,27 +70,33 @@ void MonitorRelease(MonitorHandle Handle) {
     // to is really a monitor structure
     memset(Handle,0,sizeof(struct _MonitorHandle));
 }
-// Monitor the handles for input
-// for at most Timeout seconds
-// returns the number of Handles
-// read from plus the number of
-// housekeeping calls. Returns
-// after the first read and/or
+// Monitor the handles for input for at most Timeout seconds
+// returns the number of Handles read from plus the number of
+// housekeeping calls. Returns after the first read and/or
 // housekeeping event
 int MonitorProcess(int Timeout) {
-    fd_set readfds;
+    fd_set readfds,writefds,errorfds;
     int  maxfd = 0;
-    time_t nexthk;
-    struct timeval tv;
+    time_t nexthk = 0;
     int eventcnt = 0;
-    
+    long curltout;
 
-    // If there is a timeout then set nexthk to it otherwise set it to zero
-    nexthk = Timeout > 0 ? time(NULL) + Timeout : 0;
+    // Get curls timeout recomendation
+    curl_multi_timeout(CurlHandle, &curltout);
+    // If < zero then set to zero
+    curltout = curltout < 0 ? 0 : curltout;
+    // Is Timeout earlier?
+    if(Timeout)
+      curltout = curltout == 0 || curltout > (Timeout * 1000) ? Timeout * 1000 : curltout;
+
+    // Get fds from curl that need to be monitored
+    FD_ZERO(&readfds);
+    FD_ZERO(&writefds);
+    FD_ZERO(&errorfds);
+    curl_multi_fdset(CurlHandle,&readfds,&writefds,&errorfds,&maxfd);
     // Set up the readfds and the time of the next houskeeping
     // Compacts the array by moving handles from the end into
     // empty spaces
-    FD_ZERO(&readfds);
     for(int i=0; i < MaxInUse;i++ ) {
       // Compact the array
       while((Monitor[i].Flags & FLG_USED) == 0 && i < MaxInUse) {
@@ -109,10 +125,29 @@ int MonitorProcess(int Timeout) {
                  Monitor[i].Handle.NextHouseKeep;
       }
     }
-    // Set the timeval
-    time_t now = time(NULL);
-    tv.tv_sec = nexthk == 0 ? 0 : now < nexthk ? nexthk - now : 0;
-    tv.tv_usec = 0;
+    // Calculate the timeout
+    struct timeval tv;
+    int64_t time_ms;
+    if( nexthk ) {
+      gettimeofday(&tv,NULL);
+      // convert to milliseconds
+      time_ms = (uint64_t) tv.tv_sec * 1000 + tv.tv_usec/1000;
+      // Calculate how long till nexthk
+      time_ms = (uint64_t) nexthk * 1000 - time_ms;
+      // A zero value could result in waiting Timeout seconds
+      if(time_ms <= 0)
+        time_ms = 1;
+    }
+    else {
+      time_ms = 0;
+    }
+    // What comes first? curl or nexthk
+    time_ms =  time_ms && time_ms < curltout ? time_ms : curltout;
+    // Make sure it isn't negative or zero
+    // Set the timeout
+    tv.tv_sec = time_ms/1000;
+    tv.tv_usec = (time_ms%1000)*1000;
+    // Finally,
     int sr;
     if( (sr = select(maxfd+1,&readfds,NULL,NULL,&tv)) < 0 ) {
       perror("select error");
@@ -136,6 +171,11 @@ int MonitorProcess(int Timeout) {
         }
       }
     }
+    // Let curl perform anything it wants
+    int running = 0;
+    curl_multi_perform(CurlHandle,&running);
+    if(0 && running)
+      printf("%i still running\n",running);
     // Everything has been read so test for housekeeping events
     for(int i=0,hcnt = MaxInUse; i < hcnt; i++) {
       // For convenience
@@ -151,6 +191,24 @@ int MonitorProcess(int Timeout) {
         mh->HouseKeepCB(mh,mh->HouseKeepData);
       }
     }
+    // Process curl messages
+    struct CURLMsg *m;
+    do {
+      int msgq = 0;
+      m = curl_multi_info_read(CurlHandle, &msgq);
+      if(m) {
+        switch(m->msg) {
+          case CURLMSG_DONE: {
+            CURL *e = m->easy_handle;
+            curl_multi_remove_handle(CurlHandle,e);
+            curl_easy_cleanup(e);
+          } break;
+          default:
+//            printf("MSG: %i\n",m->msg);
+            break;
+        }
+      }
+    } while(m);
     return eventcnt;
 }
 

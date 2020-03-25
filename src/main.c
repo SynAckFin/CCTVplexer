@@ -30,16 +30,58 @@
 #include <errno.h>
 #include <ctype.h>
 #include <lirc_client.h>
+#include <curl/curl.h>
 
 #include "cctvplexer.h"
 #include "render.h"
 #include "monitor.h"
+int Stop = 0;
+extern CURLM *CurlHandle;
 
-static int Stop = 0;
 static void sighandler(int iSignal) {
   printf("signal caught: %d - exiting\n", iSignal);
   if(Stop >= 3) exit(0);
   Stop++;
+}
+static size_t CurlWrite(char *ptr,size_t size, size_t nmemb, void *userdata) {
+    return size * nmemb;
+}
+static void PTZOperation(Plexer p,KeyMap k) {
+    PTZController ptz;
+
+    if(p->Focus == NULL || p->Focus->PTZ == NULL)
+      return;
+    ptz = p->Focus->PTZ;
+    if( k->OpCode >= Op_PTZ_Max)
+      return;
+    if(ptz->Control[k->OpCode].URL == NULL)
+      return;
+
+    CURL *easy = curl_easy_init( );
+    char buffer[1024];
+    snprintf(buffer,1024,ptz->Control[k->OpCode].URL,
+             k->OpData1,k->OpData2,k->OpData3,k->OpData4,k->OpData5);
+    curl_easy_setopt(easy,CURLOPT_URL,buffer);
+    curl_easy_setopt(easy,CURLOPT_WRITEFUNCTION,CurlWrite);
+    switch(ptz->Control[k->OpCode].Method) {
+      case HTTP_DELETE:
+        curl_easy_setopt(easy,CURLOPT_CUSTOMREQUEST,"DELETE");
+      case HTTP_GET: break;
+      case HTTP_PUT:
+        curl_easy_setopt(easy,CURLOPT_CUSTOMREQUEST,"PUT");
+      case HTTP_POST:
+        if(ptz->Control[k->OpCode].Content)
+          snprintf(buffer,1024,ptz->Control[k->OpCode].Content,
+              k->OpData1,k->OpData2,k->OpData3,k->OpData4,k->OpData5);
+        else {
+          buffer[0] = 0;
+        }
+        curl_easy_setopt(easy,CURLOPT_COPYPOSTFIELDS,buffer);
+        break;
+      default: break;
+    }
+    printf("Adding\n");
+    curl_multi_add_handle(CurlHandle,easy);
 }
 static pid_t RunStream(Camera cam) {
     if(pipe(cam->StreamPipe) < 0) {
@@ -80,6 +122,8 @@ static void SetView(Plexer p,int32_t view) {
       return;
 
     p->CurrentView = view;
+    if(p->View[view].Focus)
+      p->Focus = p->View[view].Focus;
     RenderSetBackground(NULL,p->View[view].Background);
     // There is a glitch on some TVs when a
     // fullscreen render is placed underneath
@@ -154,9 +198,9 @@ static void HouseKeepCamera(MonitorHandle Handle,void *Data) {
 }
 static void ReadFromLirc(MonitorHandle Handle,void *Data) {
     Plexer p = Data;
-    char *code = NULL;
+    char *lirccode = NULL;
 
-    if( lirc_nextcode(&code) < 0 ) {
+    if( lirc_nextcode(&lirccode) < 0 ) {
       // The connection to lirc has probably closed
       // so shut it down properly and tell housekeep
       // to reopen it later
@@ -165,53 +209,62 @@ static void ReadFromLirc(MonitorHandle Handle,void *Data) {
       MonitorSetHouseKeepingTime(Handle,time(NULL) + 10);
       return;
     }
-    if(code == NULL) {
+    if(lirccode == NULL) {
       printf("Failed to get code from lirc!!\n");
       return;
     }
-    // Beyond this point code needs to freed before returning
+    // Copy and free lirccode so there is no need to keep track
+    char code[256];                 // Should really use a define for this
+    strncpy(code,lirccode,256);
+    code[255] = 0;
+    free(lirccode);
 
     // The lirc code has four items seperated by a single space:
     //   KeyCode    - 64bit hexadecimal number
     //   Repeat     - hex number of repeats
     //   KeyString  - The key as a string
     //   RemoteName - The name of the remote
-    // Only interested in the RemoteName and KeyString (for now)
-    char *kcode,*rpt,*kstr,*rname;
-    kcode = code;
-    rname = strrchr(code,' ');
-    if(rname) *rname++ = 0;
-    kstr  = strrchr(code,' ');
-    if(kstr) *kstr++ = 0;
-    rpt = strrchr(code,' ');
-    if(rpt) *rpt++ = 0;
-    // there might be trailing CR/LF at end of rname
-    for(char *s = rname; *s; s++)
-      if(isspace(*s)) *s = 0;
-    // Only proceed if successfully decoded
-    if( !(kcode && rpt && kstr && rname) ) {
-      printf("Failed to fully decode %s\n",code);
-      goto endRFL;
+    char *field1,*field2,*field3,*field4,*endstr;
+    field1 = code;
+    field2 = field1 ? strchr(field1,' ')   : NULL;
+    field3 = field2 ? strchr(field2+1,' ') : NULL;
+    field4 = field3 ? strchr(field3+1,' ') : NULL;
+    endstr = field4 ? strpbrk(field4+1,"\n\r\f\t\v ") : NULL;
+    if( !(field1 && field2 && field3 && field4) ) {
+      printf("Unable to interpret lirc code %s\n",code);
+      return;
     }
+    // Terminate the fields
+    *field2++ = *field3++ = *field4++ = 0;
+    if(endstr)
+      *endstr = 0;
+    // Extract the data
+    uint64_t keycode = strtoll(field1,NULL,16);
+    uint32_t repeat  = strtol(field2,NULL,16);
+    char    *key     = field3;
+    char    *remote  = field4;
+    (void) keycode;               // Avoid warnings
     // Find the remote control
     RemoteControl rc = NULL;
     for(int i=0; i < p->RemoteControlCount; i++) {
-      if(strcmp(p->RemoteControl[i].Name,rname) == 0) {
+      if(strcmp(p->RemoteControl[i].Name,remote) == 0) {
         rc = &p->RemoteControl[i];
         break;
       }
     }
     if(rc == NULL) {
-      printf("No key definitions for remote %s\n",rname);
-      goto endRFL;
+      printf("No key definitions for remote %s\n",remote);
+      return;
     }
     // Find the keystr
     int low=0,high=rc->KeyCount;
     int found = -1;
     while(low < high) {
       int check = (low+high)/2;
-//      printf("%i %i %i, %s %s\n",low,check,high,rc->Key[check].Key,kstr);
-      int n = strcmp(rc->Key[check].Key,kstr);
+      // printf("%i %i %i, %s %s\n",low,check,high,rc->Key[check].Key,key);
+      int n = strcmp(rc->Key[check].Key,key);
+      // Compare the repeatcount if necessary
+      n = n || rc->Key[check].RepeatCount == -1 ? n : rc->Key[check].RepeatCount - repeat;
       if( n == 0 ) {
         found = check;
         break;
@@ -221,10 +274,18 @@ static void ReadFromLirc(MonitorHandle Handle,void *Data) {
       else
         high = check;
     }
-    if(found < 0)
-      goto endRFL;
+    if(found < 0) {
+//      printf("Unhandled key %s with remote %s\n",key,remote);
+      return;
+    }
+    // What to with it
+    if( rc->Key[found].OpCode > Op_PTZ_None && rc->Key[found].OpCode < Op_PTZ_Max) {
+      PTZOperation(p,&rc->Key[found]);
+      return;
+    }
     switch(rc->Key[found].OpCode) {
-      case Op_None: 
+      case Op_None:
+      case Op_PTZ_Max:
         break;
       case Op_SetView:
         SetView(p,rc->Key[found].OpData1);
@@ -235,11 +296,13 @@ static void ReadFromLirc(MonitorHandle Handle,void *Data) {
       case Op_PrevView:
         SetView(p,(p->CurrentView-1+p->ViewCount) % p->ViewCount);
         break;
+      case Op_Quit:
+        Stop = 1;
+        break;
       default:
+        printf("Opcode %i not implemented\n",rc->Key[found].OpCode);
         break;
     }
-endRFL:
-    free(code);
 }
 static void HouseKeepLirc(MonitorHandle Handle,void *Data) {
     printf("Housekeeping for lirc\n");
@@ -261,12 +324,20 @@ static void HouseKeepLirc(MonitorHandle Handle,void *Data) {
 }
 static void ReadFromKeyBoard(MonitorHandle Handle,void *Data) {
     Plexer p = Data;
-    int c = getchar();
-    if( c >= '0' && c <= '9' ) {
-      c -= '0';
-      SetView(p,c);
+    char  inbuf[BUFSIZ];
+    int   n;
+    n = read(0,inbuf,BUFSIZ);
+    if(n > 1) {
+      for(int i=0; i<(n-1); i++)
+        printf("0x%02x,",inbuf[i]);
+      printf("0x%02x\n",inbuf[n-1]);
     }
-    else if(c == 'q')
+    
+    if( inbuf[0] >= '0' && inbuf[0] <= '9' ) {
+      inbuf[0] -= '0';
+      SetView(p,inbuf[0]);
+    }
+    else if(inbuf[0] == 'q')
       Stop++;
 }
 int main(int ac, char *av[]) {
@@ -286,6 +357,8 @@ int main(int ac, char *av[]) {
       printf("Error setting up display\n");
       return -1;
     }
+    // Initialiase FD monitoring
+    MonitorInitialise();
     // Assign each camera a render handle
     for(int i=0; i < plexer->CameraCount; i++) {
       plexer->Camera[i].RenderHandle = RenderNew(plexer->Camera[i].Name);

@@ -11,3 +11,6 @@ At the moment you switch views using the keys 0-9 and hit q to quit.
 1. Integration with CEC so that you can change views etc using your TV remote control
 2. Integration with lircd so you can other remotes
 3. Control of PTZs
+
+#libcec-dev
+#lirc

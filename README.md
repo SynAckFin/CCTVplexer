@@ -13,6 +13,7 @@ If any of your cameras are PTZs then you might also be able to control them usin
 sudo apt install libcurl4-openssl-dev
 sudo apt install libcec-dev
 sudo apt install liblirc-dev
+sudo apt install libconfig-dev
 ```
 ## Clone repository
 ```

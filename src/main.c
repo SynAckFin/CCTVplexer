@@ -80,7 +80,6 @@ static void PTZOperation(Plexer p,KeyMap k) {
         break;
       default: break;
     }
-    printf("Adding\n");
     curl_multi_add_handle(CurlHandle,easy);
 }
 static pid_t RunStream(Camera cam) {
@@ -332,7 +331,7 @@ static void ReadFromKeyBoard(MonitorHandle Handle,void *Data) {
         printf("0x%02x,",inbuf[i]);
       printf("0x%02x\n",inbuf[n-1]);
     }
-    
+
     if( inbuf[0] >= '0' && inbuf[0] <= '9' ) {
       inbuf[0] -= '0';
       SetView(p,inbuf[0]);

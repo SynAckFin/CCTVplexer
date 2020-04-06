@@ -32,7 +32,10 @@ static struct option Options[] = {
   {"remotename",  required_argument, 0,  'n' },    // Name to use for the remote control
   {"loglevel",    required_argument, 0,  'l' },    // loglevel
   {"cecloglevel", required_argument, 0,  'c' },    // CEC loglevel
-  {0,         0,                 0,  0 }
+  {"Tuner",       no_argument,       0,  'T' },    // Register as a tuner
+  {"Player",      no_argument,       0,  'P' },    // Register as a player
+  {"Recorder",    no_argument,       0,  'R' },    // Register as a recorder
+  {0,             0,                 0,  0 }
 };
 //
 static int Stop = 0;
@@ -342,7 +345,7 @@ static void CB_SourceActivated(void* lib, const cec_logical_address addr,uint8_t
 // Initialise the CEC Interface
 //   return 0 on success
 //
-int CECinit(struct CallbackData *CBD,char *Name,char *Port) {
+int CECinit(struct CallbackData *CBD,char *Name,char *Port,int isTuner,int isPlayer, int isRecorder) {
     // Initialise config structure
     libcecc_reset_configuration(&CEC_Config);
     // Set up callbacks
@@ -362,9 +365,13 @@ int CECinit(struct CallbackData *CBD,char *Name,char *Port) {
     // Set the device types
     // Set it as multiple devices so that more key presses
     // for the remote get forwarded to us.
-    CEC_Config.deviceTypes.types[0] = CEC_DEVICE_TYPE_TUNER;
-    CEC_Config.deviceTypes.types[1] = CEC_DEVICE_TYPE_RECORDING_DEVICE;
-    CEC_Config.deviceTypes.types[2] = CEC_DEVICE_TYPE_PLAYBACK_DEVICE;
+    int idx = 0;
+    if(isPlayer)
+      CEC_Config.deviceTypes.types[idx++] = CEC_DEVICE_TYPE_PLAYBACK_DEVICE;
+    if(isTuner)
+      CEC_Config.deviceTypes.types[idx++] = CEC_DEVICE_TYPE_TUNER;
+    if(isRecorder)
+      CEC_Config.deviceTypes.types[idx++] = CEC_DEVICE_TYPE_RECORDING_DEVICE;
     // Initialise
     if (libcecc_initialise(&CEC_Config, &CEC_Interface, NULL) != 1) {
       printf("can't initialise libCEC\n");
@@ -425,6 +432,9 @@ static void usage(char *Name) {
     fprintf(stderr," %-32s%s\n","","CEC_LOG_TRAFFIC 0x08");
     fprintf(stderr," %-32s%s\n","","CEC_LOG_DEBUG   0x10");
     fprintf(stderr," %-32s%s\n","","CEC_LOG_ALL     0x1F");
+    fprintf(stderr," %-30s%s\n","-T, --tuner","Register as a Tuner");
+    fprintf(stderr," %-30s%s\n","-R, --recorder","Register as a Recorder");
+    fprintf(stderr," %-30s%s\n","-P, --player","Register as a Player");
     exit(EX_USAGE);
 }
 int main(int ac, char *av[]) {
@@ -435,10 +445,13 @@ int main(int ac, char *av[]) {
     char *port = NULL;                    // CEC port
     char *release = LIRC_RELEASE_SUFFIX;
     char *rname = "CECRemote";
+    int  istuner = 0;
+    int  isplayer = 0;
+    int  isrecorder = 0;
 
     int c;
     int idx = 0;
-    while ( (c = getopt_long(ac, av, "o:p:r:n:l:c:",Options,&idx)) >= 0) {
+    while ( (c = getopt_long(ac, av, "o:p:r:n:l:c:TRP",Options,&idx)) >= 0) {
       switch (c) {
         case 0:
           printf("Oops, my mistake; check def for --%s\n",Options[idx].name);
@@ -449,6 +462,9 @@ int main(int ac, char *av[]) {
         case 'n': rname = optarg; break;
         case 'l': LogLevel = strtol(optarg,NULL,0); break;
         case 'c': CECLogLevel = strtol(optarg,NULL,0); break;
+        case 'T': istuner    = 1; break;
+        case 'R': isplayer   = 1; break;
+        case 'P': isrecorder = 1; break;
         case '?':
         default:  usage(av[0]); break;
       }
@@ -460,6 +476,8 @@ int main(int ac, char *av[]) {
       fprintf(stderr,"\n");
       usage(av[0]);
     }
+    if( istuner == 0 && isplayer == 0 && isrecorder == 0)
+      istuner = isplayer = isrecorder = 1;
     // No output buffering if it isn't a tty
     if(!isatty(fileno(stdout)))
       setbuf(stdout, NULL);
@@ -474,7 +492,7 @@ int main(int ac, char *av[]) {
     cbd.RemoteName = rname;
     cbd.ReleaseSuffix = release;
     // Initialise the CEC
-    if(CECinit(&cbd,osd,port)) {
+    if(CECinit(&cbd,osd,port,istuner,isplayer,isrecorder)) {
       fprintf(stderr,"Failed to initialise CEC\n");
       return EX_UNAVAILABLE;
     }

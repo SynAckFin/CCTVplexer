@@ -571,6 +571,8 @@ static int LoadKeyMaps(Plexer plx,config_t *cfg,config_setting_t *kmaps) {
           case Op_PTZ_ZoomIn:
           case Op_PTZ_ZoomOut:
           case Op_PTZ_GotoPreset:
+          case Op_PTZ_FocusNear:
+          case Op_PTZ_FocusFar:
             break;
           default: WARN(key,"Unhandled opcode %i for action %s\n",rc->Key[k].OpCode,action); break;
         }

@@ -19,14 +19,15 @@
 
 int  RenderInitialise(void);
 void RenderDeInitialise(void);
-void *RenderNew(char *);
+void *RenderNew(char *,int);
 void *RenderGetBuffer(void *,int32_t *);
 void *RenderProcessBuffer(void *,void *,int32_t,int32_t);
 void RenderSetViewPort(void *,int,int,int,int,int,int,int,int);
 void RendererSetInvisible(void *);
 void RendererSetFullScreen(void *,int,int,double);
 void RendererSetRectangle(void *,double,double,double,double,int,int,double);
-void *RenderSetBackground(void *, uint32_t );
+void *RenderSetBackgroundColour(void *, uint32_t );
+void *RenderSetBackgroundImage(void *, char * );
 void RenderRelease(void *);
 
 #endif

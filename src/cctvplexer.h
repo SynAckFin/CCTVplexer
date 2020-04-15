@@ -68,7 +68,8 @@ struct _CameraView {
 struct _View {
     CameraView View;
     Camera     Focus;
-    int32_t    Background;
+    int32_t    BackgroundColour;
+    char      *BackgroundImage;
 };
 struct _KeyMap {
     char    *Key;
@@ -94,7 +95,8 @@ struct _Plexer {
     int32_t       CurrentView;
     int32_t       RemoteControlCount;
     RemoteControl RemoteControl;
-    int32_t       Background;
+    int32_t       BackgroundColour;
+    char         *BackgroundImage;
 };
 struct _PTZController {
     char *Name;

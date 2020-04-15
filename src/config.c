@@ -396,13 +396,17 @@ static int LoadViews(Plexer plx,config_t *cfg,config_setting_t *views,config_set
       for(int j = 0; j < plx->CameraCount; j++) {
         memcpy(&plx->View[i].View[j],&DefaultView,sizeof(struct _CameraView));
       }
-      plx->View[i].Background = plx->Background;
+      plx->View[i].BackgroundColour = plx->BackgroundColour;
     }
     // Configure each view
     for(int i=0; i < plx->ViewCount; i++) {
       config_setting_t *v = config_setting_get_elem(views,i);
       char *viewname = config_setting_name(v);
-      config_setting_lookup_int(v,"Background",&plx->View[i].Background);
+      config_setting_lookup_int(v,"BackgroundColour",&plx->View[i].BackgroundColour);
+      const char *image = NULL;
+      config_setting_lookup_string(v,"BackgroundImage",&image);
+      if(image)
+        plx->View[i].BackgroundImage = strdup(image);
       const char *focus;
       if(config_setting_lookup_string(v,"Focus",&focus)) {
         int camidx = GetIndex(cset,focus);
@@ -602,9 +606,12 @@ Plexer LoadConfig(char *file) {
     config_set_options(&cfg,CONFIG_OPTION_AUTOCONVERT);
     // Allocate memory for the plexer
     plexer = calloc(1,sizeof(struct _Plexer));
-    // Default Background colour
-    config_lookup_int(&cfg,"Background",&plexer->Background);
-
+    // Default Background colour and image
+    const char *image = NULL;
+    config_lookup_int(&cfg,"BackgroundColour",&plexer->BackgroundColour);
+    config_lookup_string(&cfg,"BackgroundImage",&image);
+    if(image)
+      plexer->BackgroundImage = strdup(image);
     // CAMERAS
     config_setting_t *cams = config_lookup(&cfg,"Camera");
     LoadCameras(plexer,&cfg,cams);

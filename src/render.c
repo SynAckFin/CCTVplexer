@@ -36,6 +36,11 @@
 #define VIDEO_RENDER "OMX.broadcom.video_render"
 #define BGRND_SOURCE "OMX.broadcom.source"
 #define NULL_SINK    "OMX.broadcom.null_sink"
+#define RESIZE       "OMX.broadcom.resize"
+
+#define INVISIBLE_LAYER   -3
+#define BG_COLOUR_LAYER   -2
+#define BG_IMAGE_LAYER    -1
 
 #define RGB888_TO_RGB565(c)   ((((c) >> 8) & 0xf800 ) | (((c) >> 5) & 0x07e0 ) | (((c) >> 3) & 0x001f ))
 
@@ -79,14 +84,16 @@ struct _Renderer {
     char Name[32];
     OMX_HANDLETYPE Decode;
     OMX_U32   DecodePort;
+    OMX_HANDLETYPE Resize;
+    OMX_U32   ResizePort;
     OMX_HANDLETYPE Render;
     OMX_U32   RenderPort;
     Buffer DecodeBuffer;
     Buffer LastUsed;
     uint32_t  NumberOfBuffers;
-    int ReadyToRender;
-    int Rendering;
-    int IsInvisible;
+//    int ReadyToRender;
+//    int Rendering;
+//    int IsInvisible;
 };
 typedef struct _Renderer *Renderer;
 //
@@ -94,9 +101,11 @@ typedef struct _Renderer *Renderer;
 //
 static DISPMANX_DISPLAY_HANDLE_T Display;
 static DISPMANX_MODEINFO_T DisplayInfo;
-static Renderer Background;
+static Renderer BackgroundColour;
+static Renderer BackgroundImage;
 static OMX_HANDLETYPE NullSink;
 static OMX_U32 NullSinkPort;
+static void *SetupTunnel(Renderer r,OMX_U32 port);
 
 // Used for logging and debugging
 static char *StateToString(OMX_STATETYPE state) {
@@ -197,9 +206,7 @@ static OMX_ERRORTYPE CB_EventHandler(OMX_HANDLETYPE hComponent,
         break;
       case OMX_EventPortSettingsChanged:
         printf("CB port settings changed for %s Port %d\n", name,nData1);
-        if( r && nData1 == (r->DecodePort+1) ) {
-          r->ReadyToRender = 1;
-        }
+        SetupTunnel(r,nData1);
         break;
       case OMX_EventMark:
         printf("CB buffer mark %p\n", pEventData);
@@ -278,10 +285,69 @@ static int GetBasePort(Renderer r,OMX_HANDLETYPE h) {
     
     return port.nStartPortNumber;
 }
+static void *SetupTunnel(Renderer r,OMX_U32 port) {
+    OMX_PARAM_PORTDEFINITIONTYPE portdef;
+    if(r == NULL)
+      return NULL;
+    if(port == (r->DecodePort+1)) {
+      if( r->Resize ) {
+        // Setup tunnel between decode and resize
+        printf("%s: adding tunnel from decode to resize\n",r->Name);
+        portdef.nSize = sizeof(OMX_PARAM_PORTDEFINITIONTYPE);
+        portdef.nVersion.nVersion = OMX_VERSION;
+        portdef.nPortIndex = port;
+        WARN(r,OMX_GetParameter,r->Decode,OMX_IndexParamPortDefinition, &portdef);
+        portdef.nPortIndex = r->ResizePort;
+        WARN(r,OMX_SetParameter,r->Resize,OMX_IndexParamPortDefinition, &portdef);
+        WARN(r,OMX_SetupTunnel,r->Decode,port,r->Resize,r->ResizePort);
+        WARN(r,OMX_SendCommand,r->Decode,OMX_CommandPortEnable,port, NULL);
+        WARN(r,OMX_SendCommand,r->Resize,OMX_CommandPortEnable,r->ResizePort, NULL);
+        WARN(r,OMX_SendCommand,r->Resize,OMX_CommandStateSet,OMX_StateIdle, NULL);
+      }
+      else if( r->Render ) {
+        // Setup tunnel between decode and render
+        printf("%s: adding tunnel from decode to render\n",r->Name);
+        WARN(r,OMX_SetupTunnel,r->Decode,r->DecodePort+1,r->Render,r->RenderPort);
+        WARN(r,OMX_SendCommand,r->Decode,OMX_CommandPortEnable,r->DecodePort+1, NULL);
+        WARN(r,OMX_SendCommand,r->Render,OMX_CommandPortEnable,r->RenderPort, NULL);
+        WARN(r,OMX_SendCommand,r->Render,OMX_CommandStateSet,OMX_StateIdle, NULL);
+        WARN(r,OMX_SendCommand,r->Render,OMX_CommandStateSet,OMX_StateExecuting, NULL);
+      }
+    }
+    else if(port == (r->ResizePort+1)) {
+      // Setup tunnel between resize and render
+      printf("%s: adding tunnel from resize to render\n",r->Name);
+      WARN(r,OMX_SendCommand,r->Resize,OMX_CommandPortDisable,port, NULL);
+      portdef.nSize = sizeof(OMX_PARAM_PORTDEFINITIONTYPE);
+      portdef.nVersion.nVersion = OMX_VERSION;
+      portdef.nPortIndex = port;
+      WARN(r,OMX_GetParameter,r->Resize,OMX_IndexParamPortDefinition, &portdef);
+      portdef.format.image.eCompressionFormat = OMX_IMAGE_CodingUnused;
+//*        portdef.format.image.eColorFormat = OMX_COLOR_Format32bitARGB8888; 	
+      portdef.format.image.eColorFormat = OMX_COLOR_FormatYUV420PackedPlanar;	
+//*        portdef.format.image.eColorFormat = OMX_COLOR_Format16bitRGB565;	
+//      portdef.format.image.nFrameWidth = 1920;
+//      portdef.format.image.nFrameHeight = 1080;
+//      portdef.format.image.nStride = 0;
+//      portdef.format.image.nSliceHeight = 0;
+//      portdef.format.image.bFlagErrorConcealment = OMX_FALSE;
+      WARN(r,OMX_SetParameter,r->Resize,OMX_IndexParamPortDefinition, &portdef);
+      WARN(r,OMX_SetupTunnel,r->Resize,port,r->Render,r->RenderPort);
+      WARN(r,OMX_SendCommand,r->Resize,OMX_CommandPortEnable,port, NULL);
+      WARN(r,OMX_SendCommand,r->Render,OMX_CommandPortEnable,r->RenderPort, NULL);
+      WARN(r,OMX_SendCommand,r->Render,OMX_CommandStateSet,OMX_StateIdle, NULL);
+      WARN(r,OMX_SendCommand,r->Resize,OMX_CommandStateSet,OMX_StateExecuting, NULL);
+      WARN(r,OMX_SendCommand,r->Render,OMX_CommandStateSet,OMX_StateExecuting, NULL);
+    }
+    else {
+      printf("%s Port unknown %i\n",r->Name,port);
+    }
+    return r;
+}
 //
 // Setup the render and decoder and allocate buffers
 //
-static Renderer SetupRenderer(char *Name,char *Decode,char *Render,int Compression) {
+static Renderer SetupRenderer(char *Name,char *Decode,char *Render,int Compression,int Resizer) {
     Renderer rend;
     OMX_CALLBACKTYPE callbacks;
     OMX_STATETYPE state;
@@ -296,13 +362,19 @@ static Renderer SetupRenderer(char *Name,char *Decode,char *Render,int Compressi
     callbacks.FillBufferDone  = CB_FillBufferDone;
 
     FATAL(rend,OMX_GetHandle,&rend->Decode,Decode,rend,&callbacks);
-    FATAL(rend,OMX_GetHandle,&rend->Render,Render,rend,&callbacks);
     OMX_U32 decodeport = rend->DecodePort = GetBasePort(rend,rend->Decode);
+    FATAL(rend,OMX_GetHandle,&rend->Render,Render,rend,&callbacks);
     OMX_U32 renderport = rend->RenderPort = GetBasePort(rend,rend->Render);
+    if(Resizer) {
+      FATAL(rend,OMX_GetHandle,&rend->Resize,RESIZE,rend,&callbacks);
+      rend->ResizePort = GetBasePort(rend,rend->Resize);
+    }
     // Disable all the ports
     WARN(rend,OMX_SendCommand,rend->Decode,   OMX_CommandPortDisable, decodeport,   NULL);
     WARN(rend,OMX_SendCommand,rend->Decode,   OMX_CommandPortDisable, decodeport+1, NULL);
     WARN(rend,OMX_SendCommand,rend->Render,   OMX_CommandPortDisable, renderport,   NULL);
+    if(Resizer)
+      WARN(rend,OMX_SendCommand,rend->Resize, OMX_CommandPortDisable, rend->ResizePort, NULL);
     // Set the input format
     // to do this need to know port type
     OMX_PARAM_PORTDEFINITIONTYPE portdef;
@@ -443,9 +515,13 @@ void RenderDeInitialise() {
       OMX_FreeHandle(NullSink);
       NullSink = NULL;
     }
-    if(Background) {
-      RenderRelease(Background);
-      Background = NULL;
+    if(BackgroundColour) {
+      RenderRelease(BackgroundColour);
+      BackgroundColour = NULL;
+    }
+    if(BackgroundImage) {
+      RenderRelease(BackgroundImage);
+      BackgroundImage = NULL;
     }
     OMX_Deinit();
     vc_dispmanx_display_close(Display);
@@ -466,6 +542,12 @@ void RenderRelease(void *handle) {
       OMX_SendCommand(r->Decode,OMX_CommandPortDisable,r->DecodePort+1,NULL);
       OMX_SendCommand(r->Decode,OMX_CommandFlush,r->DecodePort+1, NULL);
       OMX_SendCommand(r->Decode,OMX_CommandPortDisable,r->DecodePort,NULL);
+    }
+    // Disable and flush resizer port
+    if(r->Resize) {
+      OMX_SendCommand(r->Resize,OMX_CommandPortDisable,r->ResizePort+1,NULL);
+      OMX_SendCommand(r->Resize,OMX_CommandFlush,r->ResizePort+1, NULL);
+      OMX_SendCommand(r->Resize,OMX_CommandPortDisable,r->ResizePort,NULL);
     }
     // Disable render ports
     if(r->Render) {
@@ -489,6 +571,13 @@ void RenderRelease(void *handle) {
       WaitForComponentState(r,r->Decode,OMX_StateLoaded,2);
       OMX_FreeHandle(r->Decode);
     }
+    if(r->Resize) {
+      WARN(r,OMX_SendCommand,r->Resize,OMX_CommandStateSet, OMX_StateIdle, NULL);
+      WaitForComponentState(r,r->Resize,OMX_StateIdle,2);
+      WARN(r,OMX_SendCommand,r->Resize,OMX_CommandStateSet, OMX_StateLoaded, NULL);
+      WaitForComponentState(r,r->Resize,OMX_StateLoaded,2);
+      OMX_FreeHandle(r->Resize);
+    }
     if(r->Render) {
       WARN(r,OMX_SendCommand,r->Render,OMX_CommandStateSet, OMX_StateIdle, NULL);
       WaitForComponentState(r,r->Render,OMX_StateIdle,2);
@@ -501,8 +590,8 @@ void RenderRelease(void *handle) {
 //
 // Sets up a decoder/renderer for a H264 stream
 //
-void *RenderNew(char *Name) {
-    return SetupRenderer(Name,VIDEO_DECODE,VIDEO_RENDER,OMX_VIDEO_CodingAVC);
+void *RenderNew(char *Name,int Resizer) {
+    return SetupRenderer(Name,VIDEO_DECODE,VIDEO_RENDER,OMX_VIDEO_CodingAVC,Resizer);
 }
 //
 // Get a buffer to put stream data in
@@ -549,36 +638,20 @@ void *RenderProcessBuffer(void *handle,void *data,int32_t length,int flag) {
     if(flag)
       buff->Header->nFlags = OMX_BUFFERFLAG_EOS;
     ABORT(r,OMX_EmptyThisBuffer,r->Decode, buff->Header);
-    if(r->ReadyToRender == 0) {
-      return r;
-    }
-    if(r->Rendering)
-      return r;
-    if(r->IsInvisible)
-      return r;
-
-    // The tunnel to the renderer has to be set up
-    ABORT(r,OMX_SetupTunnel,r->Decode,r->DecodePort+1,r->Render,r->RenderPort);
-    ABORT(r,OMX_SendCommand,r->Decode,OMX_CommandPortEnable,r->DecodePort+1, NULL);
-    ABORT(r,OMX_SendCommand,r->Render,OMX_CommandPortEnable,r->RenderPort, NULL);
-    ABORT(r,OMX_SendCommand,r->Render,OMX_CommandStateSet,OMX_StateIdle, NULL);
-//    WARN(r,OMX_SendCommand,sink,OMX_CommandStateSet,OMX_StateExecuting, NULL);
-    OMX_SendCommand(r->Render,OMX_CommandStateSet,OMX_StateExecuting, NULL);
-    r->Rendering = 1;
     return r;
 }
 //
 // Sets the background colour to colour. The colour should be 24bit RGB.
 //
-void *RenderSetBackground(void *handle, uint32_t colour) {
+void *RenderSetBackgroundColour(void *handle, uint32_t colour) {
     Renderer r;
     OMX_PARAM_SOURCETYPE source;
 
-    if(Background == NULL) {
+    if(BackgroundColour == NULL) {
       OMX_CALLBACKTYPE callbacks;
-      r = Background = calloc(1,sizeof(struct _Renderer));
+      r = BackgroundColour = calloc(1,sizeof(struct _Renderer));
 
-      strcpy(r->Name,"Background");
+      strcpy(r->Name,"BackgroundColour");
       // Create the render and decoder objects
       callbacks.EventHandler    = CB_EventHandler;
       callbacks.EmptyBufferDone = CB_EmptyBufferDone;
@@ -595,7 +668,7 @@ void *RenderSetBackground(void *handle, uint32_t colour) {
       FATAL(r,OMX_SendCommand,r->Decode,OMX_CommandStateSet, OMX_StateIdle, NULL);
       FATAL(r,OMX_SendCommand,r->Decode,OMX_CommandStateSet, OMX_StateExecuting, NULL);
       // Set to fullscreen
-      RendererSetFullScreen(r,0,0,1.0);
+      RendererSetFullScreen(r,0,BG_COLOUR_LAYER,-1.0);
       // Set the input format and colour
       memset(&source, 0, sizeof(OMX_PARAM_SOURCETYPE));
       source.nSize = sizeof(OMX_PARAM_SOURCETYPE);
@@ -603,7 +676,9 @@ void *RenderSetBackground(void *handle, uint32_t colour) {
       source.nPortIndex = r->DecodePort;
       source.eType = OMX_SOURCE_COLOUR;
       source.nParam = RGB888_TO_RGB565(colour);
+      source.nFrameCount = 1;
       FATAL(r,OMX_SetParameter,r->Decode, OMX_IndexParamSource, &source);
+
       // Set up the tunnel
       ABORT(r,OMX_SetupTunnel,r->Decode,r->DecodePort,r->Render,r->RenderPort);
       ABORT(r,OMX_SendCommand,r->Decode,OMX_CommandPortEnable,r->DecodePort, NULL);
@@ -612,7 +687,7 @@ void *RenderSetBackground(void *handle, uint32_t colour) {
       OMX_SendCommand(r->Render,OMX_CommandStateSet,OMX_StateExecuting, NULL);
       return r;
     }
-    r = Background;
+    r = BackgroundColour;
     WARN(r,OMX_SendCommand,r->Decode,OMX_CommandPortDisable,r->DecodePort,NULL);
 
     memset(&source, 0, sizeof(OMX_PARAM_SOURCETYPE));
@@ -621,55 +696,56 @@ void *RenderSetBackground(void *handle, uint32_t colour) {
     source.nPortIndex = r->DecodePort;
     WARN(r,OMX_GetParameter,r->Decode, OMX_IndexParamSource, &source);
     source.nParam = RGB888_TO_RGB565(colour);
+    source.nFrameCount = 1;
     WARN(r,OMX_SetParameter,r->Decode, OMX_IndexParamSource, &source);
     WARN(r,OMX_SendCommand,r->Decode,OMX_CommandPortEnable,r->DecodePort,NULL);
     return r;    
 }
+//
+// Sets the background image.
+// The image parameter isn't used. All this does is take down
+// the pipeline between the decoder and the renderer and resets
+// it so that it gets re-established once the image is decoded.
+// The only reason for this is if the background image changes
+// size the buffers need to be re-allocated.
+//
+void *RenderSetBackgroundImage(void *handle, char *image) {
+    Renderer r;
+
+    if(BackgroundImage == NULL) {
+      r = BackgroundImage = SetupRenderer("BackgroundImage",IMAGE_DECODE,VIDEO_RENDER,OMX_IMAGE_CodingJPEG,0);
+      RendererSetFullScreen(r,0,BG_IMAGE_LAYER,-1.0);
+    }
+    else {
+      r = BackgroundImage;
+      // Disable the port
+      WARN(r,OMX_SendCommand,r->Decode,OMX_CommandPortDisable,r->DecodePort+1,NULL);
+      WARN(r,OMX_SendCommand,r->Render,OMX_CommandPortDisable,r->RenderPort,NULL);
+      // Release the buffers
+      WARN(r,OMX_SendCommand,r->Decode,OMX_CommandFlush,r->DecodePort+1, NULL);
+      WARN(r,OMX_SendCommand,r->Render,OMX_CommandFlush,r->RenderPort, NULL);
+    }
+    return r;
+}
 // Make the stream invisible
 void RendererSetInvisible(void *handle) {
     Renderer r  = handle;
-
+    OMX_CONFIG_DISPLAYREGIONTYPE dr;
+    OMX_ERRORTYPE e;
     if(r == NULL)
       return;
-    if(r->IsInvisible)
-      return;
-    r->IsInvisible = 1;
-    if(r->Rendering == 0)
-      return;
 
-    // Disable the port
-    WARN(r,OMX_SendCommand,r->Decode,OMX_CommandPortDisable,r->DecodePort+1,NULL);
-    WARN(r,OMX_SendCommand,r->Render,OMX_CommandPortDisable,r->RenderPort,NULL);
-    // Release the buffers
-    WARN(r,OMX_SendCommand,r->Decode,OMX_CommandFlush,r->DecodePort+1, NULL);
-    WARN(r,OMX_SendCommand,r->Render,OMX_CommandFlush,r->RenderPort, NULL);
-    // Add tunnel to NullSink
-    WARN(r,OMX_SetupTunnel,r->Decode,r->DecodePort+1,NullSink,NullSinkPort);
-    WARN(r,OMX_SendCommand,r->Decode,OMX_CommandPortEnable,r->DecodePort+1, NULL);
-    return;
-}
-// Make the stream visible
-void RendererSetVisible(void *handle) {
-    Renderer r  = handle;
+    memset(&dr, 0, sizeof(dr));
+    dr.nSize = sizeof(OMX_CONFIG_DISPLAYREGIONTYPE);
+    dr.nVersion.nVersion = OMX_VERSION;
+    dr.nPortIndex = r->RenderPort;
 
-    if(r == NULL)
-      return;
-    if(r->IsInvisible == 0)
-      return;
-    r->IsInvisible = 0;
-    if(r->Rendering == 0)
-      return;
-    // Disable the port
-    WARN(r,OMX_SendCommand,r->Decode,OMX_CommandPortDisable,r->DecodePort+1,NULL);
-    // Release the buffers
-    WARN(r,OMX_SendCommand,r->Decode,OMX_CommandFlush,r->DecodePort+1, NULL);
-    // Add tunnel
-    WARN(r,OMX_SetupTunnel,r->Decode,r->DecodePort+1,r->Render,r->RenderPort);
-    WARN(r,OMX_SendCommand,r->Decode,OMX_CommandPortEnable,r->DecodePort+1, NULL);
-    WARN(r,OMX_SendCommand,r->Render,OMX_CommandPortEnable,r->RenderPort, NULL);
-    WARN(r,OMX_SendCommand,r->Render,OMX_CommandStateSet,OMX_StateIdle, NULL);
-    WARN(r,OMX_SendCommand,r->Render,OMX_CommandStateSet,OMX_StateExecuting, NULL);
-    return;
+    dr.layer = INVISIBLE_LAYER;
+    dr.fullscreen = OMX_FALSE;
+    dr.set = OMX_DISPLAY_SET_LAYER | OMX_DISPLAY_SET_FULLSCREEN;
+    if((e = OMX_SetParameter(r->Render,OMX_IndexConfigDisplayRegion,&dr)) != OMX_ErrorNone) {
+      printf("Error setting invisible\n");
+    }
 }
 // Display stream  fullscreen.
 void RendererSetFullScreen(void *handle,int aspect,int layer,double alpha) {
@@ -679,22 +755,21 @@ void RendererSetFullScreen(void *handle,int aspect,int layer,double alpha) {
     OMX_ERRORTYPE e;
     if(r == NULL)
       return;
-
-    if(r->IsInvisible) {
-      RendererSetVisible(handle);
-    }
     memset(&dr, 0, sizeof(dr));
     dr.nSize = sizeof(OMX_CONFIG_DISPLAYREGIONTYPE);
     dr.nVersion.nVersion = OMX_VERSION;
-    dr.nPortIndex = 90;
+    dr.nPortIndex = r->RenderPort;
 
     alphavalue = 255 * alpha;
     // Correct for any mistakes
-    dr.alpha = alphavalue > 255 ? 255 : alphavalue < 0 ? 0 : alphavalue;
+    dr.alpha = alphavalue > 255 ? 255 : alphavalue < 0 ? OMX_DISPLAY_ALPHA_FLAGS_DISCARD_LOWER_LAYERS : alphavalue;
     dr.noaspect = aspect ? OMX_FALSE : OMX_TRUE;
     dr.layer = layer;
     dr.fullscreen = OMX_TRUE;
-    dr.set = OMX_DISPLAY_SET_ALPHA | OMX_DISPLAY_SET_NOASPECT | OMX_DISPLAY_SET_FULLSCREEN;
+    dr.set = OMX_DISPLAY_SET_ALPHA      |
+             OMX_DISPLAY_SET_NOASPECT   |
+             OMX_DISPLAY_SET_LAYER      |
+             OMX_DISPLAY_SET_FULLSCREEN;
     if((e = OMX_SetParameter(r->Render,OMX_IndexConfigDisplayRegion,&dr)) != OMX_ErrorNone) {
       printf("Error setting fullscreen\n");
     }
@@ -711,7 +786,7 @@ void RendererSetRectangle(void *handle,double X,double Y,double W,double H,int a
     memset(&dr, 0, sizeof(dr));
     dr.nSize = sizeof(OMX_CONFIG_DISPLAYREGIONTYPE);
     dr.nVersion.nVersion = OMX_VERSION;
-    dr.nPortIndex = 90;
+    dr.nPortIndex = r->RenderPort;
 
     alphavalue = 255 * alpha;
     
@@ -730,8 +805,5 @@ void RendererSetRectangle(void *handle,double X,double Y,double W,double H,int a
              OMX_DISPLAY_SET_DEST_RECT;
     if((e = OMX_SetParameter(r->Render,OMX_IndexConfigDisplayRegion,&dr)) != OMX_ErrorNone) {
       printf("Error setting fullscreen\n");
-    }
-    if(r->IsInvisible) {
-      RendererSetVisible(handle);
     }
 }

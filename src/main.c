@@ -123,7 +123,7 @@ static void SetView(Plexer p,int32_t view) {
     p->CurrentView = view;
     if(p->View[view].Focus)
       p->Focus = p->View[view].Focus;
-    RenderSetBackground(NULL,p->View[view].Background);
+    RenderSetBackgroundColour(NULL,p->View[view].BackgroundColour);
     // There is a glitch on some TVs when a
     // fullscreen render is placed underneath
     // other renders. To avoid this do the
@@ -176,6 +176,26 @@ static void ReadFromCamera(MonitorHandle Handle,void *Data) {
     }
     else {
       RenderProcessBuffer(cam->RenderHandle,buffer,length,0);
+    }
+}
+static void ReadImage(MonitorHandle Handle,void *Data) {
+    char *buffer;
+    int  length,maxlength;
+
+    buffer = RenderGetBuffer(Data,&maxlength);
+    if(buffer == NULL) {
+      printf("Error getting buffer for image\n");
+      return;
+    }
+    length=read(Handle->FileDescriptor,buffer,maxlength);
+    if(length <= 0) {
+      close(Handle->FileDescriptor);
+      MonitorClearReadFD(Handle);
+      memset(buffer,0,maxlength);
+      RenderProcessBuffer(Data,buffer,0,1);
+    }
+    else {
+      RenderProcessBuffer(Data,buffer,length,length < maxlength ? 1 : 0);
     }
 }
 static void HouseKeepCamera(MonitorHandle Handle,void *Data) {
@@ -341,7 +361,8 @@ static void ReadFromKeyBoard(MonitorHandle Handle,void *Data) {
 }
 int main(int ac, char *av[]) {
     Plexer plexer;
-    MonitorHandle h;
+    MonitorHandle h,bgimage;
+    void *r;
     // Want a clean stop
     if (signal(SIGINT, sighandler) == SIG_ERR) {
       printf("can't register sighandler\n");
@@ -360,14 +381,28 @@ int main(int ac, char *av[]) {
     MonitorInitialise();
     // Assign each camera a render handle
     for(int i=0; i < plexer->CameraCount; i++) {
-      plexer->Camera[i].RenderHandle = RenderNew(plexer->Camera[i].Name);
+      plexer->Camera[i].RenderHandle = RenderNew(plexer->Camera[i].Name,0);
       if( plexer->Camera[i].RenderHandle == NULL ) {
         printf("Unable to assign render handle to %s(%i). Camera will not display\n",
                                   plexer->Camera[i].Name,i);
       }
     }
-    // Set the background
-    RenderSetBackground(NULL,plexer->Background);
+    // Set up the background colour
+    RenderSetBackgroundColour(NULL,plexer->BackgroundColour);
+    // Set up the background image
+    r = RenderSetBackgroundImage(NULL,NULL);
+    bgimage = MonitorNew("BackgroundImage");
+    MonitorClearReadFD(bgimage);
+    MonitorSetReadData(bgimage,r);
+    MonitorSetReadCB(bgimage,ReadImage);
+    // Use it
+    int fd;
+    if( (fd = open(plexer->BackgroundImage,O_RDONLY)) < 0 ) {
+      printf("Error opening image %s: %s\n",plexer->BackgroundImage,strerror(errno));
+    }
+    else {
+      MonitorSetReadFD(bgimage,fd);
+    }
     // Set the initial view
     SetView(plexer,0);
     // Set up the CCTV streams
@@ -377,7 +412,7 @@ int main(int ac, char *av[]) {
       MonitorClearReadFD(h);
       MonitorSetReadData(h,&plexer->Camera[i]);
       MonitorSetReadCB(h,ReadFromCamera);
-      MonitorSetHouseKeepingTime(h,time(NULL) + i);
+      MonitorSetHouseKeepingTime(h,time(NULL) + i*3);
       MonitorSetHouseKeepingData(h,&plexer->Camera[i]);
       MonitorSetHouseKeepingCB(h,HouseKeepCamera);
     }

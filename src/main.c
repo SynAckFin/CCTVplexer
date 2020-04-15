@@ -367,6 +367,9 @@ int main(int ac, char *av[]) {
     Plexer plexer;
     MonitorHandle h,bgimage;
     void *r;
+
+    // Line buffered output
+    setlinebuf(stdout);
     // Want a clean stop
     if (signal(SIGINT, sighandler) == SIG_ERR) {
       printf("can't register sighandler\n");

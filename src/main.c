@@ -351,7 +351,11 @@ static void ReadFromKeyBoard(MonitorHandle Handle,void *Data) {
         printf("0x%02x,",inbuf[i]);
       printf("0x%02x\n",inbuf[n-1]);
     }
-
+    else if(n <= 0) {
+      // Dont monitor "empty" stdin
+      MonitorClearReadFD(Handle);
+      return;
+    }
     if( inbuf[0] >= '0' && inbuf[0] <= '9' ) {
       inbuf[0] -= '0';
       SetView(p,inbuf[0]);
@@ -367,6 +371,9 @@ int main(int ac, char *av[]) {
     if (signal(SIGINT, sighandler) == SIG_ERR) {
       printf("can't register sighandler\n");
     }
+    // Problems arise if stdin is closed!!
+    if( fcntl(0, F_GETFD) )
+      open("/dev/null",O_RDONLY);
     // Get the config
     if( (plexer = LoadConfig("config.cfg")) == NULL ) {
       printf("Error loading config file %s\n","config.cfg");

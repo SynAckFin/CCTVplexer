@@ -16,6 +16,7 @@
 */
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <libconfig.h>
 #include <math.h>
@@ -345,28 +346,37 @@ static int LoadCameras(Plexer plx,config_t *cfg,config_setting_t *camdefs) {
       const char *ptzcontroller = NULL;
       const char *command = NULL;
       const char *name = NULL;
+      const char *url  = NULL;
       config_setting_t *comargs = NULL;
 
       config_setting_lookup_string(camera,"FriendlyName",&name);
       config_setting_lookup_string(camera,"PTZController",&ptzcontroller);
+      config_setting_lookup_string(camera,"URL",&url);
       config_setting_lookup_string(camera,"Command",&command);
       comargs = config_setting_lookup(camera,"Arguments");
-
-      //Stream command and arguments
-      if(command == NULL) {
-        WARN(camera,"No stream command for camera %s.\n",config_setting_name(camera));
-        comargs = NULL;  // No command, no arguments
+      //Stream command and arguments or URL
+      if(url && strncmp(url,"rtsp://",7) == 0) {
+        plx->Camera[i].RTSP.URL = strdup(StringParser(cfg,camera,url));
       }
       else {
-        int argcount = comargs ? config_setting_length(comargs) : 0;
-        // Add 1 for the command and 1 for terminating NULL
-        argcount += 2;
-        plx->Camera[i].StreamCommand = calloc(argcount,sizeof(char *));
-        plx->Camera[i].StreamCommand[0] = strdup(command);
-        for(int idx = 0; comargs && idx < config_setting_length(comargs); idx++) {
-          const char *argument = config_setting_get_string_elem(comargs,idx);
-          char *s = StringParser(cfg,camera,argument);
-          plx->Camera[i].StreamCommand[idx+1] = s ? strdup(s) : NULL;
+        if(url)
+          WARN(camera,"Invalid url %s for camera %s. Onlt rtsp supported\n",
+               url,config_setting_name(camera));
+        if(command == NULL) {
+          WARN(camera,"No stream command for camera %s.\n",config_setting_name(camera));
+          comargs = NULL;  // No command, no arguments
+        }
+        else {
+          int argcount = comargs ? config_setting_length(comargs) : 0;
+          // Add 1 for the command and 1 for terminating NULL
+          argcount += 2;
+          plx->Camera[i].StreamCommand = calloc(argcount,sizeof(char *));
+          plx->Camera[i].StreamCommand[0] = strdup(command);
+          for(int idx = 0; comargs && idx < config_setting_length(comargs); idx++) {
+            const char *argument = config_setting_get_string_elem(comargs,idx);
+            char *s = StringParser(cfg,camera,argument);
+            plx->Camera[i].StreamCommand[idx+1] = s ? strdup(s) : NULL;
+          }
         }
       }
       // PTZ control

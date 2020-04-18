@@ -15,7 +15,7 @@
 #   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # 
 
-OBJS = main.o render.o config.o monitor.o
+OBJS = main.o render.o config.o monitor.o rtsp.o
 INCS = cctvplexer.h render.h monitor.h
 TARGET = cctvplexer cecremote
 

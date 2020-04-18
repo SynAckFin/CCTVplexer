@@ -47,10 +47,19 @@ enum _HttpMethod {
     HTTP_PUT,
     HTTP_DELETE
 };
+struct _RTSP {
+    char    *URL;
+    char    *Control;
+    char    *Buffer;
+    uint32_t BufferLength;
+    uint32_t BufferUsed;
+    int32_t  ContentLength;
+};
 struct _Camera {
     char    *Name;
     int32_t ControlID;
     PTZController PTZ;
+    struct _RTSP RTSP;
     char    **StreamCommand;
     int     StreamPipe[2];
     void    *RenderHandle;
@@ -107,7 +116,7 @@ struct _PTZController {
       char       *ContentType;
     } Control[Op_PTZ_Max];
 };
-
 Plexer LoadConfig(char *);
 void MonitorInitialise(void);
+void RtspStartStream(Camera);
 #endif

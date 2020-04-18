@@ -31,7 +31,11 @@ struct _MonitorHandle {
     void *DisEngageData;                        // Data to pass to DisEngageCB
     void (*DisEngageCB)(MonitorHandle, void *);   // Called when the handle is being destroyed
 };
-
+typedef struct _CurlComplete  *CurlComplete;
+struct _CurlComplete {
+    void (*Callback)(CURL *,CurlComplete);
+    void *Data;
+};
 MonitorHandle MonitorNew(const char *);
 int MonitorProcess(int);
 #define MonitorSetReadFD(h,f)           (h)->FileDescriptor = (f)

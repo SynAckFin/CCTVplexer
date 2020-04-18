@@ -417,14 +417,23 @@ int main(int ac, char *av[]) {
     SetView(plexer,0);
     // Set up the CCTV streams
     for(int i=0; i < plexer->CameraCount; i++) {
-      plexer->Camera[i].StreamPipe[0] = -1;
-      h = MonitorNew(plexer->Camera[i].Name);
-      MonitorClearReadFD(h);
-      MonitorSetReadData(h,&plexer->Camera[i]);
-      MonitorSetReadCB(h,ReadFromCamera);
-      MonitorSetHouseKeepingTime(h,time(NULL) + i*3);
-      MonitorSetHouseKeepingData(h,&plexer->Camera[i]);
-      MonitorSetHouseKeepingCB(h,HouseKeepCamera);
+      if(plexer->Camera[i].RTSP.URL) {
+        printf("RTSP Method for %s\n",plexer->Camera[i].Name);
+        RtspStartStream(&plexer->Camera[i]);
+      }
+      else if(plexer->Camera[i].StreamCommand) {
+        plexer->Camera[i].StreamPipe[0] = -1;
+        h = MonitorNew(plexer->Camera[i].Name);
+        MonitorClearReadFD(h);
+        MonitorSetReadData(h,&plexer->Camera[i]);
+        MonitorSetReadCB(h,ReadFromCamera);
+        MonitorSetHouseKeepingTime(h,time(NULL));
+        MonitorSetHouseKeepingData(h,&plexer->Camera[i]);
+        MonitorSetHouseKeepingCB(h,HouseKeepCamera);
+      }
+      else {
+        printf("No Stream method defined for camera %s\n",plexer->Camera[i].Name);
+      }
     }
     // Setup stdin for one character at a time 
     struct termios backup, raw;

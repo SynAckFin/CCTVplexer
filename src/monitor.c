@@ -83,11 +83,10 @@ int MonitorProcess(int Timeout) {
 
     // Get curls timeout recomendation
     curl_multi_timeout(CurlHandle, &curltout);
-    // If < zero then set to zero
-    curltout = curltout < 0 ? 0 : curltout;
-    // Is Timeout earlier?
-    if(Timeout)
-      curltout = curltout == 0 || curltout > (Timeout * 1000) ? Timeout * 1000 : curltout;
+    Timeout *= 1000;
+    // Determine how long to wait for input
+    curltout = curltout < 0       ? Timeout  :
+               curltout < Timeout ? curltout : Timeout;
 
     // Get fds from curl that need to be monitored
     FD_ZERO(&readfds);
@@ -199,9 +198,16 @@ int MonitorProcess(int Timeout) {
       if(m) {
         switch(m->msg) {
           case CURLMSG_DONE: {
+            CurlComplete cp = NULL;
+            curl_easy_getinfo(m->easy_handle,CURLINFO_PRIVATE,&cp);
+            if(m->data.whatever)
+              printf("MESSAGE: %s\n",(char *) m->data.whatever);
             CURL *e = m->easy_handle;
             curl_multi_remove_handle(CurlHandle,e);
-            curl_easy_cleanup(e);
+            if(cp)
+              cp->Callback(e,cp);
+            else
+              curl_easy_cleanup(e);
           } break;
           default:
 //            printf("MSG: %i\n",m->msg);
